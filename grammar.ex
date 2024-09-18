@@ -15,43 +15,58 @@ defmodule Tokenizer do
 end
 
 defmodule Grammar do
-  defmodule Rule do
-    @enforce_keys [:name, :def]
-    defstruct name: nil, def: nil
+  defmodule Clause do
+    @enforce_keys [:def]
+    defstruct def: nil, firsts: nil
 
-    def new(name, def) when is_atom(name) and is_list(def) do
-      struct(__MODULE__, name: name, def: def)
+    def new(def) when is_list(def) do
+      struct(__MODULE__, def: def)
+    end
+
+    def set_first(%__MODULE__{firsts: nil} = clause, firsts) when is_list(firsts) do
+      %{clause | firsts: firsts}
     end
   end
 
-  def check_production_chain(rules) when is_list(rules) do
-    Enum.flat_map(rules, fn %Rule{name: name, def: def} ->
-      Enum.reduce(def, [], fn
-        step, acc when is_atom(step) ->
-          case Enum.find(rules, &(&1.name == step)) do
-            nil -> [{name, step} | acc]
-            _ -> acc
-          end
-        _step, acc ->
-          acc
+  defmodule Rule do
+    @enforce_keys [:name, :clauses]
+    defstruct [:name, :clauses]
+
+    def new(name, def) when is_atom(name) and is_list(def)do
+      struct(__MODULE__, name: name, clauses: [Clause.new(def)])
+    end
+
+    def add_clause(%__MODULE__{clauses: clauses} = rule, def) when is_list(def) do
+      %{rule | clauses: clauses ++ [Clause.new(def)]}
+    end
+  end
+
+  def check_production_chain(rules) when is_map(rules) do
+    Enum.map(rules, fn {name, %Rule{name: name, clauses: clauses}} ->
+      Enum.map(clauses, fn %Clause{def: def} ->
+        Enum.map(def, fn
+          step when is_atom(step) and is_map_key(rules, step) -> []
+          step when is_atom(step) -> [{name, step}]
+          _step -> []
+        end)
       end)
     end)
+    |> List.flatten()
   end
 
-  def first_of_rules(rules) when is_list(rules) do
-    grouped_rules = Enum.group_by(rules, & &1.name, & &1.def)
-    Enum.reduce(grouped_rules, %{}, &firsts_of_rule(&1, &2, grouped_rules))
+  def first_of_rules(rules) when is_map(rules) do
+    Enum.reduce(rules, %{}, &firsts_of_rule(&1, &2, rules))
   end
 
-  def firsts_of_rule({name, _defs}, acc, _grouped_rules) when is_map_key(acc, name) do
+  def firsts_of_rule({name, %Rule{name: name}}, acc, rules) when is_map_key(acc, name) do
     acc
   end
 
-  def firsts_of_rule({name, defs}, acc, grouped_rules) do
-    Enum.reduce(defs, acc, &firsts_of_def(name, &1, &2, grouped_rules))
+  def firsts_of_rule({name, %Rule{name: name, clauses: clauses}}, acc, rules) do
+    Enum.reduce(clauses, acc, &firsts_of_clause(name, &1, &2, rules))
   end
 
-  def firsts_of_def(rule_name, [sub_rule_name | _], acc, _grouped_rules) when is_atom(sub_rule_name) and is_map_key(acc, sub_rule_name) do
+  def firsts_of_clause(rule_name, %Clause{def: [sub_rule_name | _]}, acc, _rules) when is_atom(sub_rule_name) and is_map_key(acc, sub_rule_name) do
     # sub_rule already processed
 
     sub_rule_firsts = Map.get(acc, sub_rule_name)
@@ -63,28 +78,29 @@ defmodule Grammar do
     Map.update(acc, rule_name, sub_rule_firsts, & &1 ++ sub_rule_firsts)
   end
 
-  def firsts_of_def(rule_name, [sub_rule_name | _] = rule_defs, acc, grouped_rules) when is_atom(sub_rule_name) do
+  def firsts_of_clause(rule_name, %Clause{def: [sub_rule_name | _]} = clause, acc, rules) when is_atom(sub_rule_name) do
     # sub_rule *not* already processed
 
-    sub_rule_defs = Map.get(grouped_rules, sub_rule_name)
-    acc = firsts_of_rule({sub_rule_name, sub_rule_defs}, acc, grouped_rules)
-    firsts_of_def(rule_name, rule_defs, acc, grouped_rules)
+    sub_rule = Map.get(rules, sub_rule_name)
+    acc = firsts_of_rule({sub_rule_name, sub_rule}, acc, rules)
+    firsts_of_clause(rule_name, clause, acc, rules)
   end
 
-  def firsts_of_def(name, [first | _], acc, _grouped_rules), do: Map.update(acc, name, [first], & &1 ++ [first])
+  def firsts_of_clause(name, %Clause{def: [first | _]}, acc, _rules), do: Map.update(acc, name, [first], & &1 ++ [first])
 
-  def build_matcher_for(c) when is_binary(c), do: & &1 === c
-  def build_matcher_for(%Regex{} = r), do: & Regex.match?(r, &1)
+  # def build_matcher_for(c) when is_binary(c), do: & &1 === c
+  # def build_matcher_for(%Regex{} = r), do: & Regex.match?(r, &1)
 
   defmacro rule({name, _meta, def}, do: _blk) when is_atom(name) do
     quote do
-      @rules Rule.new(unquote(name), unquote(def))
+      rules = Map.update(@rules, unquote(name), Rule.new(unquote(name), unquote(def)), & Rule.add_clause(&1, unquote(def)))
+      Module.put_attribute(unquote(__CALLER__.module), :rules, rules)
     end
   end
 
   defmacro __using__(_opts) do
     quote do
-      Module.register_attribute(unquote(__CALLER__.module), :rules, accumulate: true)
+      Module.put_attribute(unquote(__CALLER__.module), :rules, %{})
 
       @before_compile unquote(__MODULE__)
 
@@ -93,7 +109,7 @@ defmodule Grammar do
   end
 
   defmacro __before_compile__(_env) do
-    all_rules = Enum.reverse(Module.get_attribute(__CALLER__.module, :rules))
+    all_rules = Module.get_attribute(__CALLER__.module, :rules)
 
     # Check for missing rules definition
     #
@@ -108,26 +124,27 @@ defmodule Grammar do
     #
     firsts_for_rules = first_of_rules(all_rules)
 
-    productions =
-      for {name, defs} <- Enum.group_by(all_rules, & &1.name, & &1.def) do
-        quote do
-          def unquote(name)(%Tokenizer{} = tokenizer) do
-            IO.inspect(unquote(name), label: "RULE")
-            IO.inspect(tokenizer, label: "TOKENIZER")
-          end
-        end
-      end
+    # productions =
+    #   for {name, defs} <- Enum.group_by(all_rules, & &1.name, & &1.def) do
+    #     quote do
+    #       def unquote(name)(%Tokenizer{} = tokenizer) do
+    #         IO.inspect(unquote(name), label: "RULE")
+    #         IO.inspect(tokenizer, label: "TOKENIZER")
+    #       end
+    #     end
+    #   end
 
-    [start | _] = all_rules
+    # [start | _] = all_rules
 
     quote do
       def parse(input) do
         tokenizer = Tokenizer.new(input)
-        unquote(start.name)(tokenizer)
+        # unquote(start.name)(tokenizer)
       end
-
-      unquote_splicing(productions)
     end
+
+    #   unquote_splicing(productions)
+    # end
   end
 end
 
