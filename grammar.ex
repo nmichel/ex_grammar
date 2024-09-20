@@ -41,11 +41,11 @@ defmodule Grammar do
   end
 
   defmodule Clause do
-    @enforce_keys [:def, :epsilon]
-    defstruct def: nil, firsts: nil, epsilon: false
+    @enforce_keys [:def, :blk, :epsilon]
+    defstruct def: nil, firsts: nil, blk: nil, epsilon: false
 
-    def new(def, epsilon \\ false) when is_list(def) and is_atom(epsilon) do
-      struct(__MODULE__, def: def, epsilon: epsilon)
+    def new(def, blk, epsilon) when is_list(def) and is_atom(epsilon) do
+      struct(__MODULE__, def: def, blk: blk, epsilon: epsilon)
     end
 
     def is_epsilon(%__MODULE__{epsilon: epsilon}), do: epsilon
@@ -63,12 +63,12 @@ defmodule Grammar do
       struct(__MODULE__, name: name, clauses: [])
     end
 
-    def new(name, def, epsilon) when is_atom(name) and is_list(def) and def != [] and is_atom(epsilon) do
-      struct(__MODULE__, name: name, clauses: [Clause.new(def, epsilon)])
+    def new(name, def, blk, epsilon) when is_atom(name) and is_list(def) and def != [] and is_atom(epsilon) do
+      struct(__MODULE__, name: name, clauses: [Clause.new(def, blk, epsilon)])
     end
 
-    def add_clause(%__MODULE__{clauses: clauses} = rule, def, epsilon) when is_list(def) and def != [] and is_atom(epsilon) do
-      %{rule | clauses: clauses ++ [Clause.new(def, epsilon)]}
+    def add_clause(%__MODULE__{clauses: clauses} = rule, def, blk, epsilon) when is_list(def) and def != [] and is_atom(epsilon) do
+      %{rule | clauses: clauses ++ [Clause.new(def, blk, epsilon)]}
     end
 
     def add_clause(%__MODULE__{clauses: clauses} = rule, %Clause{} = clause) do
@@ -162,26 +162,35 @@ defmodule Grammar do
 
     quote do
       def unquote(name)(%Tokenizer{} = tokenizer) do
-        IO.puts("Enter #{unquote(name)}")
-        IO.puts("| Tokenizer #{inspect(tokenizer)}")
+        # IO.puts("Enter #{unquote(name)}")
+        # IO.puts("| Tokenizer #{inspect(tokenizer)}")
         unquote(nested_clauses)
       end
     end
   end
 
-  def build_production_for_clause(%Clause{firsts: firsts, epsilon: epsilon} = clause, nested_ast) do
+  def build_production_for_clause(%Clause{firsts: firsts, blk: blk, epsilon: epsilon} = clause, nested_ast) do
     quote do
       case Tokenizer.current_token(tokenizer) do
         {nil, _tokenizer} ->
           if unquote(epsilon) do
-            tokenizer
+            {tokenizer, nil}
           else
             raise "No more token"
           end
 
         {token, tokenizer} ->
           if TokenMatcher.match?(unquote(firsts), token) do
-            (unquote_splicing(build_production_code_for_clause(clause)))
+            fun_in = []
+
+            unquote_splicing(build_production_code_for_clause(clause))
+
+            fun_out =
+              (fn var!(params) ->
+                 unquote(blk)
+               end).(fun_in)
+
+            {tokenizer, fun_out}
           else
             unquote(nested_ast)
           end
@@ -190,31 +199,37 @@ defmodule Grammar do
   end
 
   def build_production_code_for_clause(%Clause{def: def}) when is_list(def) do
-    Enum.map(def, &build_production_code_for_clause_elem(&1))
+    Enum.map(def, fn elem ->
+      ast = build_production_code_for_clause_elem(elem)
+
+      quote do
+        {tokenizer, res} = unquote(ast)
+        fun_in = fun_in ++ [res]
+      end
+    end)
   end
 
   def build_production_code_for_clause_elem(rule_name) when is_atom(rule_name) do
     quote do
-      IO.puts("Call #{unquote(rule_name)}")
-      tokenizer = unquote(rule_name)(tokenizer)
+      # IO.puts("Call #{unquote(rule_name)}")
+      unquote(rule_name)(tokenizer)
     end
   end
 
   def build_production_code_for_clause_elem(matcher) do
     quote do
-      tokenizer =
-        case Tokenizer.next_token(tokenizer) do
-          {nil, _tokenizer} ->
-            raise "No more token"
+      case Tokenizer.next_token(tokenizer) do
+        {nil, _tokenizer} ->
+          raise "No more token"
 
-          {token, tokenizer} ->
-            if TokenMatcher.match?(unquote(matcher), token) do
-              IO.puts("Consume #{token}")
-              tokenizer
-            else
-              raise "Unexpected token #{token}"
-            end
-        end
+        {token, tokenizer} ->
+          if TokenMatcher.match?(unquote(matcher), token) do
+            # IO.puts("Consume #{token}")
+            {tokenizer, token}
+          else
+            raise "Unexpected token #{token}"
+          end
+      end
     end
   end
 
@@ -226,12 +241,13 @@ defmodule Grammar do
 
   def epsilon_clause() do
     quote do
-      tokenizer
+      {tokenizer, nil}
     end
   end
 
-  def store_clause(module, rule_name, meta, def, blk, epsilon \\ false) do
+  def store_clause(module, rule_name, meta, def, blk, epsilon) do
     def = Macro.escape(def)
+    blk = Macro.escape(blk)
 
     quote do
       rules = Module.get_attribute(unquote(module), :rules)
@@ -241,15 +257,15 @@ defmodule Grammar do
         Map.update(
           rules,
           unquote(rule_name),
-          Rule.new(unquote(rule_name), unquote(def), unquote(epsilon)),
-          &Rule.add_clause(&1, unquote(def), unquote(epsilon))
+          Rule.new(unquote(rule_name), unquote(def), unquote(blk), unquote(epsilon)),
+          &Rule.add_clause(&1, unquote(def), unquote(blk), unquote(epsilon))
         )
 
       Module.put_attribute(unquote(module), :rules, rules)
     end
   end
 
-  defmacro rule({name, _meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, _meta, def, blk)
+  defmacro rule({name, _meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, _meta, def, blk, false)
 
   defmacro rule!({name, _meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, _meta, def, blk, true)
 
@@ -284,6 +300,7 @@ defmodule Grammar do
     rules_with_firsts = first_of_rules(all_rules)
 
     # Check for ambiguous rules
+    #
     case Grammar.check_rules_are_not_ambiguous(rules_with_firsts) do
       [] ->
         :ok
@@ -297,11 +314,15 @@ defmodule Grammar do
         raise "\n* Ambiguous rules\n#{errors}"
     end
 
+    # Generate parser functions
+    #
     productions = build_production_for_rules(rules_with_firsts)
 
     start_rule_name = Module.get_attribute(__CALLER__.module, :start_rule_name)
     start = Map.get(rules_with_firsts, start_rule_name)
 
+    # Generate parse/1 function
+    #
     quote do
       def rules do
         unquote(Macro.escape(rules_with_firsts))
@@ -326,72 +347,92 @@ defmodule MyGrammar do
   use Grammar
 
   rule start(:expression) do
+    [expr] = params
+    "#{expr}"
   end
 
   rule expression(:term, :expression_cont) do
+    [term, cont] = params
+    "#{term} #{cont}"
   end
 
   rule! expression_cont("+", :term, :expression_cont) do
+    [_, term, cont] = params
+    "plus #{term} #{cont}"
   end
 
   rule! expression_cont("-", :term, :expression_cont) do
+    [_, term, cont] = params
+    "moins #{term} #{cont}"
   end
 
   rule term(:factor, :term_cont) do
+    [factor, cont] = params
+    "#{factor} #{cont}"
   end
 
   rule! term_cont("*", :factor, :term_cont) do
+    [_, factor, cont] = params
+    "multiplié par #{factor} #{cont}"
   end
 
   rule! term_cont("/", :factor, :term_cont) do
+    [_, factor, cont] = params
+    "divisé par #{factor} #{cont}"
   end
 
   rule factor(:number) do
+    [number] = params
+    number
   end
 
   rule factor("(", :expression, ")") do
+    [_, expression, _] = params
+    "(#{expression})"
   end
 
   rule number(~r/[0-9][0-9]+/) do
+    [number] = params
+    number
   end
 
   rule number("0") do
-    :ok
+    "0"
   end
 
   rule number("1") do
-    :ok
+    "1"
   end
 
   rule number("2") do
-    :ok
+    "2"
   end
 
   rule number("3") do
-    :ok
+    "3"
   end
 
   rule number("4") do
-    :ok
+    "4"
   end
 
   rule number("5") do
-    :ok
+    "5"
   end
 
   rule number("6") do
-    :ok
+    "6"
   end
 
   rule number("7") do
-    :ok
+    "7"
   end
 
   rule number("8") do
-    :ok
+    "8"
   end
 
   rule number("9") do
-    :ok
+    "9"
   end
 end
