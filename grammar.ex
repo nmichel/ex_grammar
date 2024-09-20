@@ -23,6 +23,23 @@ defmodule Tokenizer do
 end
 
 defmodule Grammar do
+  defprotocol TokenMatcher do
+    @spec match?(t, String.t()) :: boolean()
+    def match?(token, string)
+  end
+
+  defimpl TokenMatcher, for: BitString do
+    def match?(token, string), do: token === string
+  end
+
+  defimpl TokenMatcher, for: Regex do
+    def match?(regex, token), do: Regex.match?(regex, token)
+  end
+
+  defimpl TokenMatcher, for: List do
+    def match?(list, token), do: Enum.any?(list, &Grammar.TokenMatcher.match?(&1, token))
+  end
+
   defmodule Clause do
     @enforce_keys [:def]
     defstruct def: nil, firsts: nil
@@ -81,15 +98,15 @@ defmodule Grammar do
       |> Enum.with_index()
       # Map each first to its clause index
       |> Enum.flat_map(fn {%Clause{firsts: firsts}, id} ->
-        Enum.map(firsts, & {&1, id})
+        Enum.map(firsts, &{&1, id})
       end)
       # Group by first
-      |> Enum.group_by(& elem(&1, 0), & elem(&1, 1))
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
       # Remove duplicate ids (in case of ambiguous first, it propagates upstream)
       |> Enum.map(fn {first, clause_ids} -> {first, Enum.uniq(clause_ids)} end)
       # Keep only ambiguous firsts (i.e. appearing in more than one clause)
       |> Enum.filter(fn {_first, clause_ids} -> Enum.count(clause_ids) > 1 end)
-      |> Enum.map(& Tuple.insert_at(&1, 0, rule_name))
+      |> Enum.map(&Tuple.insert_at(&1, 0, rule_name))
     end)
     # filter out rules without conflicts
     |> Enum.filter(fn {rule_name, _first, clause_ids} -> Enum.count(clause_ids) > 0 end)
@@ -113,12 +130,13 @@ defmodule Grammar do
     # end
   end
 
-  def firsts_of_clause(rule_name, %Clause{def: [sub_rule_name | _], firsts: nil} = clause, acc, _rules) when is_atom(sub_rule_name) and is_map_key(acc, sub_rule_name) do
+  def firsts_of_clause(rule_name, %Clause{def: [sub_rule_name | _], firsts: nil} = clause, acc, _rules)
+      when is_atom(sub_rule_name) and is_map_key(acc, sub_rule_name) do
     # sub_rule already processed
 
     sub_rule_firsts = acc |> Map.get(sub_rule_name) |> Rule.get_firsts()
     updated_clause = Clause.set_firsts(clause, sub_rule_firsts)
-    Map.update!(acc, rule_name, & Rule.add_clause(&1, updated_clause))
+    Map.update!(acc, rule_name, &Rule.add_clause(&1, updated_clause))
   end
 
   def firsts_of_clause(rule_name, %Clause{def: [sub_rule_name | _], firsts: nil} = clause, acc, rules) when is_atom(sub_rule_name) do
@@ -130,24 +148,95 @@ defmodule Grammar do
   end
 
   def firsts_of_clause(rule_name, %Clause{def: [first | _]} = clause, acc, _rules) do
-    updated_clause= Clause.set_firsts(clause, [first])
-    Map.update(acc, rule_name, Rule.new(rule_name, [first]), & Rule.add_clause(&1, updated_clause))
+    updated_clause = Clause.set_firsts(clause, [first])
+    Map.update(acc, rule_name, Rule.new(rule_name, [first]), &Rule.add_clause(&1, updated_clause))
   end
 
   # def build_matcher_for(c) when is_binary(c), do: & &1 === c
   # def build_matcher_for(%Regex{} = r), do: & Regex.match?(r, &1)
 
+  def build_production_for_rules(rules) when is_map(rules) do
+    Enum.map(rules, &build_production_for_rule(&1))
+  end
+
+  def build_production_for_rule({name, %Rule{name: name, clauses: clauses}}) do
+    nested_clauses = Enum.reduce(clauses, no_clause(), &build_production_for_clause(&1, &2))
+
+    quote do
+      def unquote(name)(%Tokenizer{} = tokenizer) do
+        IO.puts("Enter #{unquote(name)}")
+        IO.puts("| Tokenizer #{inspect(tokenizer)}")
+        unquote(nested_clauses)
+      end
+    end
+  end
+
+  def build_production_for_clause(%Clause{def: def, firsts: firsts}, nested_ast) do
+    quote do
+      case Tokenizer.current_token(tokenizer) do
+        {nil, _tokenizer} ->
+          raise "No more token"
+
+        {token, tokenizer} ->
+          if TokenMatcher.match?(unquote(firsts), token) do
+            (unquote_splicing(build_production_code_for_clause(def)))
+          else
+            unquote(nested_ast)
+          end
+      end
+    end
+  end
+
+  def build_production_code_for_clause(def) when is_list(def) do
+    Enum.map(def, &build_production_code_for_clause(&1))
+  end
+
+  def build_production_code_for_clause(rule_name) when is_atom(rule_name) do
+    quote do
+      IO.puts("Call #{unquote(rule_name)}")
+      tokenizer = unquote(rule_name)(tokenizer)
+    end
+  end
+
+  def build_production_code_for_clause(matcher) do
+    quote do
+      tokenizer =
+        case Tokenizer.next_token(tokenizer) do
+          {nil, _tokenizer} ->
+            raise "No more token"
+
+          {token, tokenizer} ->
+            if TokenMatcher.match?(unquote(matcher), token) do
+              IO.puts("Consume #{token}")
+              tokenizer
+            else
+              raise "Unexpected token #{token}"
+            end
+        end
+    end
+  end
+
+  def no_clause() do
+    quote do
+      raise "No clause matched"
+    end
+  end
+
   defmacro rule({name, _meta, def}, do: _blk) when is_atom(name) do
+    def = Macro.escape(def)
+
     quote do
       rules = Module.get_attribute(unquote(__CALLER__.module), :rules)
       if rules == %{}, do: Module.put_attribute(unquote(__CALLER__.module), :start_rule_name, unquote(name))
-      rules = Map.update(rules, unquote(name), Rule.new(unquote(name), unquote(def)), & Rule.add_clause(&1, unquote(def)))
+      rules = Map.update(rules, unquote(name), Rule.new(unquote(name), unquote(def)), &Rule.add_clause(&1, unquote(def)))
       Module.put_attribute(unquote(__CALLER__.module), :rules, rules)
     end
   end
 
   defmacro __using__(_opts) do
     quote do
+      @compile {:inline, []}
+
       Module.put_attribute(unquote(__CALLER__.module), :rules, %{})
 
       @before_compile unquote(__MODULE__)
@@ -162,7 +251,9 @@ defmodule Grammar do
     # Check for missing rule declarations
     #
     case Grammar.check_all_rules_exist(all_rules) do
-      [] -> :ok
+      [] ->
+        :ok
+
       errors ->
         errors = Enum.map_join(errors, "\n", fn {name, step} -> "| #{name} misses #{step}" end)
         raise "\n* Production chain errors\n#{errors}"
@@ -174,25 +265,19 @@ defmodule Grammar do
 
     # Check for ambiguous rules
     case Grammar.check_rules_are_not_ambiguous(rules_with_firsts) do
-      [] -> :ok
+      [] ->
+        :ok
+
       errors ->
-        errors = Enum.map_join(errors, "\n", fn {name, first, clause_ids} ->
-          "| Rule #{name} has conflicts for first #{inspect(first)} on clauses #{inspect(clause_ids)}"
-        end)
+        errors =
+          Enum.map_join(errors, "\n", fn {name, first, clause_ids} ->
+            "| Rule #{name} has conflicts for first #{inspect(first)} on clauses #{inspect(clause_ids)}"
+          end)
+
         raise "\n* Ambiguous rules\n#{errors}"
     end
 
-    IO.inspect(rules_with_firsts, label: "FIRSTS")
-
-    productions =
-      for {name, %Rule{name: name, clauses: clauses}} <- rules_with_firsts do
-        quote do
-          def unquote(name)(%Tokenizer{} = tokenizer) do
-            IO.inspect(unquote(name), label: "RULE")
-            IO.inspect(tokenizer, label: "TOKENIZER")
-          end
-        end
-      end
+    productions = build_production_for_rules(rules_with_firsts)
 
     start_rule_name = Module.get_attribute(__CALLER__.module, :start_rule_name)
     start = Map.get(rules_with_firsts, start_rule_name)
@@ -209,6 +294,11 @@ defmodule Grammar do
 
       unquote_splicing(productions)
     end
+    |> tap(fn ast ->
+      ast
+      |> Macro.to_string()
+      |> IO.puts()
+    end)
   end
 end
 
@@ -216,43 +306,72 @@ defmodule MyGrammar do
   use Grammar
 
   rule start(:expression) do
-
   end
 
   rule expression(:term, :expression_cont) do
-
   end
 
-
   rule expression_cont("+", :term, :expression_cont) do
-
   end
 
   rule expression_cont("-", :term, :expression_cont) do
-
   end
 
   rule term(:factor, :term_cont) do
-
   end
 
   rule term_cont("*", :factor, :term_cont) do
-
   end
 
   rule term_cont("/", :factor, :term_cont) do
-
   end
 
   rule factor(:number) do
-
   end
 
   rule factor("(", :expression, ")") do
-
   end
 
-  rule number(~r/[0-9]+/) do
+  rule number(~r/[0-9][0-9]+/) do
+  end
 
+  rule number("0") do
+    :ok
+  end
+
+  rule number("1") do
+    :ok
+  end
+
+  rule number("2") do
+    :ok
+  end
+
+  rule number("3") do
+    :ok
+  end
+
+  rule number("4") do
+    :ok
+  end
+
+  rule number("5") do
+    :ok
+  end
+
+  rule number("6") do
+    :ok
+  end
+
+  rule number("7") do
+    :ok
+  end
+
+  rule number("8") do
+    :ok
+  end
+
+  rule number("9") do
+    :ok
   end
 end
