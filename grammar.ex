@@ -41,12 +41,14 @@ defmodule Grammar do
   end
 
   defmodule Clause do
-    @enforce_keys [:def]
-    defstruct def: nil, firsts: nil
+    @enforce_keys [:def, :epsilon]
+    defstruct def: nil, firsts: nil, epsilon: false
 
-    def new(def) when is_list(def) do
-      struct(__MODULE__, def: def)
+    def new(def, epsilon \\ false) when is_list(def) and is_atom(epsilon) do
+      struct(__MODULE__, def: def, epsilon: epsilon)
     end
+
+    def is_epsilon(%__MODULE__{epsilon: epsilon}), do: epsilon
 
     def set_firsts(%__MODULE__{firsts: nil} = clause, firsts) when is_list(firsts) do
       %{clause | firsts: firsts}
@@ -61,12 +63,12 @@ defmodule Grammar do
       struct(__MODULE__, name: name, clauses: [])
     end
 
-    def new(name, def) when is_atom(name) and is_list(def) do
-      struct(__MODULE__, name: name, clauses: [Clause.new(def)])
+    def new(name, def, epsilon) when is_atom(name) and is_list(def) and def != [] and is_atom(epsilon) do
+      struct(__MODULE__, name: name, clauses: [Clause.new(def, epsilon)])
     end
 
-    def add_clause(%__MODULE__{clauses: clauses} = rule, def) when is_list(def) do
-      %{rule | clauses: clauses ++ [Clause.new(def)]}
+    def add_clause(%__MODULE__{clauses: clauses} = rule, def, epsilon) when is_list(def) and def != [] and is_atom(epsilon) do
+      %{rule | clauses: clauses ++ [Clause.new(def, epsilon)]}
     end
 
     def add_clause(%__MODULE__{clauses: clauses} = rule, %Clause{} = clause) do
@@ -123,11 +125,6 @@ defmodule Grammar do
   def firsts_of_rule({name, %Rule{name: name, clauses: clauses}} = rule, acc, rules) do
     acc = Map.put(acc, name, Rule.new(name))
     Enum.reduce(clauses, acc, &firsts_of_clause(name, &1, &2, rules))
-
-    # TODO Check firsts do not overlap
-    # if current_rule_firsts && Enum.any?(sub_rule_firsts, & &1 in current_rule_firsts) do
-    #   raise "Firsts from #{sub_rule_name} already found for rule #{rule_name}"
-    # end
   end
 
   def firsts_of_clause(rule_name, %Clause{def: [sub_rule_name | _], firsts: nil} = clause, acc, _rules)
@@ -149,18 +146,19 @@ defmodule Grammar do
 
   def firsts_of_clause(rule_name, %Clause{def: [first | _]} = clause, acc, _rules) do
     updated_clause = Clause.set_firsts(clause, [first])
-    Map.update(acc, rule_name, Rule.new(rule_name, [first]), &Rule.add_clause(&1, updated_clause))
+    rule = Map.get(acc, rule_name) || Rule.new(rule_name)
+    rule = Rule.add_clause(rule, updated_clause)
+    Map.put(acc, rule_name, rule)
   end
-
-  # def build_matcher_for(c) when is_binary(c), do: & &1 === c
-  # def build_matcher_for(%Regex{} = r), do: & Regex.match?(r, &1)
 
   def build_production_for_rules(rules) when is_map(rules) do
     Enum.map(rules, &build_production_for_rule(&1))
   end
 
   def build_production_for_rule({name, %Rule{name: name, clauses: clauses}}) do
-    nested_clauses = Enum.reduce(clauses, no_clause(), &build_production_for_clause(&1, &2))
+    is_epsilon = Enum.any?(clauses, &Clause.is_epsilon/1)
+    no_clause = (is_epsilon && epsilon_clause()) || no_clause()
+    nested_clauses = Enum.reduce(clauses, no_clause, &build_production_for_clause(&1, &2))
 
     quote do
       def unquote(name)(%Tokenizer{} = tokenizer) do
@@ -171,15 +169,19 @@ defmodule Grammar do
     end
   end
 
-  def build_production_for_clause(%Clause{def: def, firsts: firsts}, nested_ast) do
+  def build_production_for_clause(%Clause{firsts: firsts, epsilon: epsilon} = clause, nested_ast) do
     quote do
       case Tokenizer.current_token(tokenizer) do
         {nil, _tokenizer} ->
-          raise "No more token"
+          if unquote(epsilon) do
+            tokenizer
+          else
+            raise "No more token"
+          end
 
         {token, tokenizer} ->
           if TokenMatcher.match?(unquote(firsts), token) do
-            (unquote_splicing(build_production_code_for_clause(def)))
+            (unquote_splicing(build_production_code_for_clause(clause)))
           else
             unquote(nested_ast)
           end
@@ -187,18 +189,18 @@ defmodule Grammar do
     end
   end
 
-  def build_production_code_for_clause(def) when is_list(def) do
-    Enum.map(def, &build_production_code_for_clause(&1))
+  def build_production_code_for_clause(%Clause{def: def}) when is_list(def) do
+    Enum.map(def, &build_production_code_for_clause_elem(&1))
   end
 
-  def build_production_code_for_clause(rule_name) when is_atom(rule_name) do
+  def build_production_code_for_clause_elem(rule_name) when is_atom(rule_name) do
     quote do
       IO.puts("Call #{unquote(rule_name)}")
       tokenizer = unquote(rule_name)(tokenizer)
     end
   end
 
-  def build_production_code_for_clause(matcher) do
+  def build_production_code_for_clause_elem(matcher) do
     quote do
       tokenizer =
         case Tokenizer.next_token(tokenizer) do
@@ -222,16 +224,34 @@ defmodule Grammar do
     end
   end
 
-  defmacro rule({name, _meta, def}, do: _blk) when is_atom(name) do
+  def epsilon_clause() do
+    quote do
+      tokenizer
+    end
+  end
+
+  def store_clause(module, rule_name, meta, def, blk, epsilon \\ false) do
     def = Macro.escape(def)
 
     quote do
-      rules = Module.get_attribute(unquote(__CALLER__.module), :rules)
-      if rules == %{}, do: Module.put_attribute(unquote(__CALLER__.module), :start_rule_name, unquote(name))
-      rules = Map.update(rules, unquote(name), Rule.new(unquote(name), unquote(def)), &Rule.add_clause(&1, unquote(def)))
-      Module.put_attribute(unquote(__CALLER__.module), :rules, rules)
+      rules = Module.get_attribute(unquote(module), :rules)
+      if rules == %{}, do: Module.put_attribute(unquote(module), :start_rule_name, unquote(rule_name))
+
+      rules =
+        Map.update(
+          rules,
+          unquote(rule_name),
+          Rule.new(unquote(rule_name), unquote(def), unquote(epsilon)),
+          &Rule.add_clause(&1, unquote(def), unquote(epsilon))
+        )
+
+      Module.put_attribute(unquote(module), :rules, rules)
     end
   end
+
+  defmacro rule({name, _meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, _meta, def, blk)
+
+  defmacro rule!({name, _meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, _meta, def, blk, true)
 
   defmacro __using__(_opts) do
     quote do
@@ -311,19 +331,19 @@ defmodule MyGrammar do
   rule expression(:term, :expression_cont) do
   end
 
-  rule expression_cont("+", :term, :expression_cont) do
+  rule! expression_cont("+", :term, :expression_cont) do
   end
 
-  rule expression_cont("-", :term, :expression_cont) do
+  rule! expression_cont("-", :term, :expression_cont) do
   end
 
   rule term(:factor, :term_cont) do
   end
 
-  rule term_cont("*", :factor, :term_cont) do
+  rule! term_cont("*", :factor, :term_cont) do
   end
 
-  rule term_cont("/", :factor, :term_cont) do
+  rule! term_cont("/", :factor, :term_cont) do
   end
 
   rule factor(:number) do
