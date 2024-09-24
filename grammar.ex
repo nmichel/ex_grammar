@@ -5,7 +5,7 @@ defmodule Tokenizer do
     struct(__MODULE__, tokens: String.split(input, ~r/\s+/, trim: true))
   end
 
-  def current_token(%__MODULE__{tokens: [token | tail]} = tokenizer) do
+  def current_token(%__MODULE__{tokens: [token | _tail]} = tokenizer) do
     {token, tokenizer}
   end
 
@@ -111,18 +111,18 @@ defmodule Grammar do
       |> Enum.map(&Tuple.insert_at(&1, 0, rule_name))
     end)
     # filter out rules without conflicts
-    |> Enum.filter(fn {rule_name, _first, clause_ids} -> Enum.count(clause_ids) > 0 end)
+    |> Enum.filter(fn {_rule_name, _first, clause_ids} -> Enum.count(clause_ids) > 0 end)
   end
 
   def first_of_rules(rules) when is_map(rules) do
     Enum.reduce(rules, %{}, &firsts_of_rule(&1, &2, rules))
   end
 
-  def firsts_of_rule({name, %Rule{name: name}}, acc, rules) when is_map_key(acc, name) do
+  def firsts_of_rule({name, %Rule{name: name}}, acc, _rules) when is_map_key(acc, name) do
     acc
   end
 
-  def firsts_of_rule({name, %Rule{name: name, clauses: clauses}} = rule, acc, rules) do
+  def firsts_of_rule({name, %Rule{name: name, clauses: clauses}}, acc, rules) do
     acc = Map.put(acc, name, Rule.new(name))
     Enum.reduce(clauses, acc, &firsts_of_clause(name, &1, &2, rules))
   end
@@ -245,7 +245,7 @@ defmodule Grammar do
     end
   end
 
-  def store_clause(module, rule_name, meta, def, blk, epsilon) do
+  def store_clause(module, rule_name, _meta, def, blk, epsilon) do
     def = Macro.escape(def)
     blk = Macro.escape(blk)
 
@@ -265,9 +265,9 @@ defmodule Grammar do
     end
   end
 
-  defmacro rule({name, _meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, _meta, def, blk, false)
+  defmacro rule({name, meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, meta, def, blk, false)
 
-  defmacro rule!({name, _meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, _meta, def, blk, true)
+  defmacro rule!({name, meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, meta, def, blk, true)
 
   defmacro __using__(_opts) do
     quote do
@@ -346,9 +346,34 @@ end
 defmodule MyGrammar do
   use Grammar
 
-  rule start(:expression) do
+  rule start(:program) do
+    [program] = params
+    "#{program}"
+  end
+
+  rule program(:assigment, :program_cont) do
+    [assigment, cont] = params
+    "#{assigment}\n#{cont}"
+  end
+
+  rule! program_cont(:assigment, :program_cont) do
+    [assigment, cont] = params
+    "#{assigment}\n#{cont}"
+  end
+
+  rule! assigment(:identifier, "=", :rhv) do
+    [identifier, _, expr] = params
+    "#{identifier} égal à #{expr}"
+  end
+
+  rule rhv(:expression) do
     [expr] = params
     "#{expr}"
+  end
+
+  rule rhv(:string) do
+    [string] = params
+    "#{string}"
   end
 
   rule expression(:term, :expression_cont) do
@@ -391,48 +416,18 @@ defmodule MyGrammar do
     "(#{expression})"
   end
 
-  rule number(~r/[0-9][0-9]+/) do
+  rule number(~r/[0-9]+/) do
     [number] = params
     number
   end
 
-  rule number("0") do
-    "0"
+  rule identifier(~r/[a-zA-Z]+[a-zA-Z0-9]*/) do
+    [string] = params
+    string
   end
 
-  rule number("1") do
-    "1"
-  end
-
-  rule number("2") do
-    "2"
-  end
-
-  rule number("3") do
-    "3"
-  end
-
-  rule number("4") do
-    "4"
-  end
-
-  rule number("5") do
-    "5"
-  end
-
-  rule number("6") do
-    "6"
-  end
-
-  rule number("7") do
-    "7"
-  end
-
-  rule number("8") do
-    "8"
-  end
-
-  rule number("9") do
-    "9"
+  rule string(~r/"[\S]*"/) do
+    [string] = params
+    string
   end
 end
