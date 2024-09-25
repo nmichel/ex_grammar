@@ -1,27 +1,3 @@
-defmodule Tokenizer do
-  defstruct tokens: []
-
-  def new(input) when is_binary(input) do
-    struct(__MODULE__, tokens: String.split(input, ~r/\s+/, trim: true))
-  end
-
-  def current_token(%__MODULE__{tokens: [token | _tail]} = tokenizer) do
-    {token, tokenizer}
-  end
-
-  def current_token(%__MODULE__{tokens: []} = tokenizer) do
-    {nil, tokenizer}
-  end
-
-  def next_token(%__MODULE__{tokens: [token | tail]} = tokenizer) do
-    {token, struct(tokenizer, tokens: tail)}
-  end
-
-  def next_token(%__MODULE__{tokens: []} = tokenizer) do
-    {nil, tokenizer}
-  end
-end
-
 defmodule Grammar do
   defprotocol TokenMatcher do
     @spec match?(t, String.t()) :: boolean()
@@ -38,6 +14,24 @@ defmodule Grammar do
 
   defimpl TokenMatcher, for: List do
     def match?(list, token), do: Enum.any?(list, &Grammar.TokenMatcher.match?(&1, token))
+  end
+
+  defprotocol TokenExtractor do
+    @spec pattern(t) :: Regex.t()
+    def pattern(token)
+  end
+
+  defimpl TokenExtractor, for: BitString do
+    def pattern(token), do: ~r/^#{Regex.escape(token)}/
+  end
+
+  defimpl TokenExtractor, for: Regex do
+    def pattern(token) do
+      case Regex.source(token) do
+        "^" <> _rest -> token
+        source -> ~r/^#{source}/
+      end
+    end
   end
 
   defmodule Clause do
@@ -245,6 +239,18 @@ defmodule Grammar do
     end
   end
 
+  def build_token_list(rules) when is_map(rules) do
+    Enum.flat_map(rules, &build_token_list_for_rule(&1))
+  end
+
+  def build_token_list_for_rule({name, %Rule{name: name, clauses: clauses}}) do
+    Enum.flat_map(clauses, &build_token_list_for_clause(&1))
+  end
+
+  def build_token_list_for_clause(%Clause{def: def}) do
+    def |> Enum.reject(&is_atom/1)
+  end
+
   def store_clause(module, rule_name, _meta, def, blk, epsilon) do
     def = Macro.escape(def)
     blk = Macro.escape(blk)
@@ -314,6 +320,67 @@ defmodule Grammar do
         raise "\n* Ambiguous rules\n#{errors}"
     end
 
+    # Generate the list of possible tokens from the clause firsts lists
+    # Then generate the token extractors
+    #
+    token_extractors =
+      rules_with_firsts
+      |> build_token_list()
+      |> IO.inspect()
+      |> Enum.map(fn token_ast ->
+        quote do
+          TokenExtractor.pattern(unquote(token_ast))
+        end
+      end)
+
+    tokenizer =
+      quote do
+        defmodule Tokenizer do
+          @enforce_keys [:input]
+          defstruct input: ""
+
+          @extractors [unquote_splicing(token_extractors)]
+
+          def new(input) when is_binary(input) do
+            struct(__MODULE__, input: input)
+            |> drop_spaces()
+          end
+
+          def current_token(%__MODULE__{input: input} = tokenizer) do
+            {token, _} = extract(input)
+            {token, tokenizer}
+          end
+
+          def next_token(%__MODULE__{input: input} = tokenizer) do
+            {token, l} = extract(input)
+
+            if l > 0 do
+              ^token <> rest = input
+              tokenizer = %{tokenizer | input: rest} |> drop_spaces()
+              {token, tokenizer}
+            else
+              {nil, tokenizer}
+            end
+          end
+
+          def extract(string) when is_binary(string) do
+            @extractors
+            |> Enum.reduce({nil, 0}, fn extractor, {current_match, current_length} ->
+              case Regex.run(extractor, string) do
+                nil -> {current_match, current_length}
+                [match] when byte_size(match) > current_length -> {match, byte_size(match)}
+                _ -> {current_match, current_length}
+              end
+            end)
+          end
+
+          def drop_spaces(%__MODULE__{input: input} = tokenizer) do
+            trimed = Regex.replace(~r/^\s+/, input, "", global: false)
+            %{tokenizer | input: trimed}
+          end
+        end
+      end
+
     # Generate parser functions
     #
     productions = build_production_for_rules(rules_with_firsts)
@@ -324,22 +391,25 @@ defmodule Grammar do
     # Generate parse/1 function
     #
     quote do
+      unquote(tokenizer)
+
       def rules do
         unquote(Macro.escape(rules_with_firsts))
       end
 
       def parse(input) do
-        tokenizer = Tokenizer.new(input)
+        tokenizer = __MODULE__.Tokenizer.new(input)
         unquote(start.name)(tokenizer)
       end
 
       unquote_splicing(productions)
     end
-    |> tap(fn ast ->
-      ast
-      |> Macro.to_string()
-      |> IO.puts()
-    end)
+
+    # |> tap(fn ast ->
+    #   ast
+    #   |> Macro.to_string()
+    #   |> IO.puts()
+    # end)
   end
 end
 
@@ -426,7 +496,7 @@ defmodule MyGrammar do
     string
   end
 
-  rule string(~r/"[\S]*"/) do
+  rule string(~r/"[\S\s]*"/) do
     [string] = params
     string
   end
