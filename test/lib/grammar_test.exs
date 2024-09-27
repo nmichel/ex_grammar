@@ -1,14 +1,28 @@
 defmodule GrammarTest do
   use ExUnit.Case
 
-  test "simplest" do
-    defmodule MySimpleGrammar do
+  test "simplest strict" do
+    defmodule MySimpleGrammarStrict do
+      use Grammar
+
+      rule start("hello"), do: "world"
+    end
+
+    assert {_, "world"} = MySimpleGrammarStrict.parse("hello")
+    assert_raise RuntimeError, fn ->
+      MySimpleGrammarStrict.parse("     ")
+    end
+  end
+
+  test "simplest relaxed" do
+    defmodule MySimpleGrammarRelaxed do
       use Grammar
 
       rule! start("hello"), do: "world"
     end
 
-    assert {_, "world"} = MySimpleGrammar.parse("hello")
+    assert {_, "world"} = MySimpleGrammarRelaxed.parse("hello")
+    assert {_, nil} = MySimpleGrammarRelaxed.parse("")
   end
 
   test "two words and spaces" do
@@ -22,5 +36,11 @@ defmodule GrammarTest do
       hello
              world
     """)
+
+    assert {_, nil} = MySimpleGrammar.parse("")
+
+    assert_raise RuntimeError, fn ->
+      MySimpleGrammar.parse("hello")
+    end
   end
 end
