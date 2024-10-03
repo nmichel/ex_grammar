@@ -156,8 +156,6 @@ defmodule Grammar do
 
     quote do
       def unquote(name)(%Tokenizer{} = tokenizer) do
-        # IO.puts("Enter #{unquote(name)}")
-        # IO.puts("| Tokenizer #{inspect(tokenizer)}")
         unquote(nested_clauses)
       end
     end
@@ -205,7 +203,6 @@ defmodule Grammar do
 
   def build_production_code_for_clause_elem(rule_name) when is_atom(rule_name) do
     quote do
-      # IO.puts("Call #{unquote(rule_name)}")
       unquote(rule_name)(tokenizer)
     end
   end
@@ -218,7 +215,6 @@ defmodule Grammar do
 
         {token, tokenizer} ->
           if TokenMatcher.match?(unquote(matcher), token) do
-            # IO.puts("Consume #{token}")
             {tokenizer, token}
           else
             raise "Unexpected token #{token}"
@@ -326,7 +322,6 @@ defmodule Grammar do
     token_extractors =
       rules_with_firsts
       |> build_token_list()
-      |> IO.inspect()
       |> Enum.map(fn token_ast ->
         quote do
           TokenExtractor.pattern(unquote(token_ast))
@@ -404,7 +399,6 @@ defmodule Grammar do
 
       unquote_splicing(productions)
     end
-
     # |> tap(fn ast ->
     #   ast
     #   |> Macro.to_string()
