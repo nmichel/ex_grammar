@@ -14,7 +14,11 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenExtractor, for: IP do
-    def pattern(_token), do: ~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/
+    @pattern ~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/
+
+    def try_read(_token_prototype, input_string) do
+      Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+    end
   end
 
   defmodule Number do
@@ -32,7 +36,11 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenExtractor, for: Number do
-    def pattern(_token), do: ~r/^[0-9]+/
+    @pattern ~r/^[0-9]+/
+
+    def try_read(_token_prototype, input_string) do
+      Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+    end
   end
 
   defmodule QuotedString do
@@ -50,7 +58,11 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenExtractor, for: QuotedString do
-    def pattern(_token), do: ~r/^"[\S\s]*"/
+    @pattern ~r/^"[\S\s]*"/
+
+    def try_read(_token_prototype, input_string) do
+      Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+    end
   end
 
   defmodule Identifier do
@@ -68,6 +80,10 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenExtractor, for: Identifier do
-    def pattern(_token), do: ~r/^[a-zA-Z]+[a-zA-Z0-9_]*/
+    @pattern ~r/^[a-zA-Z]+[a-zA-Z0-9_]*/
+
+    def try_read(_token_prototype, input_string) do
+      Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+    end
   end
 end

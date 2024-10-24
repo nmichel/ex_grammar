@@ -5,32 +5,51 @@ defmodule Grammar do
   end
 
   defimpl TokenMatcher, for: BitString do
-    def match?(token, string), do: token === string
+    def match?(token, token), do: true
+    def match?(_token, _string), do: false
   end
 
   defimpl TokenMatcher, for: Regex do
     def match?(regex, token), do: Regex.match?(regex, token)
   end
 
-  defimpl TokenMatcher, for: List do
-    def match?(list, token), do: Enum.any?(list, &Grammar.TokenMatcher.match?(&1, token))
+  defmodule TokenExtractorHelper do
+    @spec normalize_regex(Regex.t()) :: Regex.t()
+    def normalize_regex(regex) do
+      case Regex.source(regex) do
+        "^" <> _rest -> regex
+        source -> ~r/^#{source}/
+      end
+    end
+
+    @spec try_read_from_regex(Regex.t(), String.t()) :: nil | {String.t(), integer()}
+    def try_read_from_regex(pattern, input_string) do
+      case Regex.run(pattern, input_string) do
+        nil -> nil
+        [match] -> {match, byte_size(match)}
+      end
+    end
   end
 
   defprotocol TokenExtractor do
-    @spec pattern(t) :: Regex.t()
-    def pattern(token)
+    @spec try_read(t, String.t()) :: nil | {String.t(), integer()}
+    def try_read(token_prototype, input_string)
   end
 
   defimpl TokenExtractor, for: BitString do
-    def pattern(token), do: ~r/^#{Regex.escape(token)}/
+    def try_read(token_prototype, input_string) do
+      case input_string do
+        <<^token_prototype::binary, _rest::binary>> -> {token_prototype, String.length(token_prototype)}
+        _ -> nil
+      end
+    end
   end
 
   defimpl TokenExtractor, for: Regex do
-    def pattern(token) do
-      case Regex.source(token) do
-        "^" <> _rest -> token
-        source -> ~r/^#{source}/
-      end
+    def try_read(token_prototype, input_string) do
+      token_prototype
+      |> TokenExtractorHelper.normalize_regex()
+      |> TokenExtractorHelper.try_read_from_regex(input_string)
     end
   end
 
@@ -172,7 +191,7 @@ defmodule Grammar do
           end
 
         {token, tokenizer} ->
-          if TokenMatcher.match?(unquote(firsts), token) do
+          if Enum.any?(unquote(firsts), &Grammar.TokenMatcher.match?(&1, token)) do
             fun_in = []
 
             unquote_splicing(build_production_code_for_clause(clause))
@@ -317,16 +336,8 @@ defmodule Grammar do
     end
 
     # Generate the list of possible tokens from the clause firsts lists
-    # Then generate the token extractors
     #
-    token_extractors =
-      rules_with_firsts
-      |> build_token_list()
-      |> Enum.map(fn token_ast ->
-        quote do
-          TokenExtractor.pattern(unquote(token_ast))
-        end
-      end)
+    token_templates = build_token_list(rules_with_firsts)
 
     tokenizer =
       quote do
@@ -334,7 +345,7 @@ defmodule Grammar do
           @enforce_keys [:input]
           defstruct input: ""
 
-          @extractors [unquote_splicing(token_extractors)]
+          @extractors [unquote_splicing(token_templates)]
 
           def new(input) when is_binary(input) do
             struct(__MODULE__, input: input)
@@ -360,11 +371,11 @@ defmodule Grammar do
 
           def extract(string) when is_binary(string) do
             @extractors
-            |> Enum.reduce({nil, 0}, fn extractor, {current_match, current_length} ->
-              case Regex.run(extractor, string) do
-                nil -> {current_match, current_length}
-                [match] when byte_size(match) > current_length -> {match, byte_size(match)}
-                _ -> {current_match, current_length}
+            |> Enum.reduce({nil, 0}, fn token_template, {current_token, current_length} ->
+              case TokenExtractor.try_read(token_template, string) do
+                nil -> {current_token, current_length}
+                {token, length} when length > current_length -> {token, length}
+                _found_tuple -> {current_token, current_length}
               end
             end)
           end
