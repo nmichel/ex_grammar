@@ -2,9 +2,12 @@ defmodule Grammar do
   defmodule TokenExtractorHelper do
     @spec normalize_regex(Regex.t()) :: Regex.t()
     def normalize_regex(regex) do
-      case Regex.source(regex) do
+      source = Regex.source(regex)
+      opt = Regex.opts(regex)
+
+      case source do
         "^" <> _rest -> regex
-        source -> ~r/^#{source}/
+        source -> Regex.compile!("^#{source}", opt)
       end
     end
 
@@ -47,6 +50,7 @@ defmodule Grammar do
     def match?(regex, token) when is_binary(token) do
       [token] == Regex.run(regex, token)
     end
+
     def match?(_regex, _token), do: false
   end
 
@@ -180,14 +184,14 @@ defmodule Grammar do
   def build_production_for_clause(%Clause{firsts: firsts, blk: blk, epsilon: epsilon} = clause, nested_ast) do
     quote do
       case Tokenizer.current_token(tokenizer) do
-        {nil, _tokenizer} ->
+        {{nil, cursor}, tokenizer} ->
           if unquote(epsilon) do
             {tokenizer, nil}
           else
-            raise "No more token"
+            raise "[#{inspect(cursor)}] : cannot find token"
           end
 
-        {token, tokenizer} ->
+        {{token, _cursor}, tokenizer} ->
           if Enum.any?(unquote(firsts), &Grammar.TokenExtractor.match?(&1, token)) do
             fun_in = []
 
@@ -226,14 +230,14 @@ defmodule Grammar do
   def build_production_code_for_clause_elem(matcher) do
     quote do
       case Tokenizer.next_token(tokenizer) do
-        {nil, _tokenizer} ->
-          raise "No more token"
+        {{nil, cursor}, tokenizer} ->
+          raise "[#{inspect(cursor)}] : cannot find token"
 
-        {token, tokenizer} ->
+        {{token, cursor}, tokenizer} ->
           if TokenExtractor.match?(unquote(matcher), token) do
             {tokenizer, token}
           else
-            raise "Unexpected token #{token}"
+            raise "[#{inspect(cursor)}] : unexpected token #{token}"
           end
       end
     end
@@ -241,7 +245,7 @@ defmodule Grammar do
 
   def no_clause() do
     quote do
-      raise "No clause matched"
+      raise "[#{tokenizer.current_line} | #{tokenizer.current_column}] No clause matched"
     end
   end
 
@@ -340,8 +344,10 @@ defmodule Grammar do
       quote do
         defmodule Tokenizer do
           @enforce_keys [:input]
-          defstruct input: ""
+          defstruct input: "", current_line: 1, current_column: 1
 
+          @newlines ~c[\n]
+          @whitespaces ~c[ \t\v\f\r]
           @extractors [unquote_splicing(token_templates)]
 
           def new(input) when is_binary(input) do
@@ -350,36 +356,84 @@ defmodule Grammar do
           end
 
           def current_token(%__MODULE__{input: input} = tokenizer) do
-            {token, _} = extract(input)
+            {token, _} = try_read_token(tokenizer)
             {token, tokenizer}
           end
 
           def next_token(%__MODULE__{input: input} = tokenizer) do
-            {token, l} = extract(input)
+            case try_read_token(tokenizer) do
+              {token, 0} ->
+                {token, tokenizer}
 
-            if l > 0 do
-              {_token_string, rest} = String.split_at(input, l)
-              tokenizer = %{tokenizer | input: rest} |> drop_spaces()
-              {token, tokenizer}
-            else
-              {nil, tokenizer}
+              {token, token_length} ->
+                tokenizer =
+                  tokenizer
+                  |> consume_token(token_length)
+                  |> drop_spaces()
+
+                {token, tokenizer}
             end
           end
 
-          def extract(string) when is_binary(string) do
+          def try_read_token(%__MODULE__{} = tokenizer) do
+            input = tokenizer.input
+            cursor = {tokenizer.current_line, tokenizer.current_column}
+
             @extractors
             |> Enum.reduce({nil, 0}, fn token_template, {current_token, current_length} ->
-              case TokenExtractor.try_read(token_template, string) do
+              case TokenExtractor.try_read(token_template, input) do
                 nil -> {current_token, current_length}
                 {token, length} when length > current_length -> {token, length}
                 _found_tuple -> {current_token, current_length}
               end
             end)
+            |> then(fn {token, length} -> {{token, cursor}, length} end)
           end
 
-          def drop_spaces(%__MODULE__{input: input} = tokenizer) do
-            trimed = Regex.replace(~r/^\s+/, input, "", global: false)
-            %{tokenizer | input: trimed}
+          def consume_token(%__MODULE__{} = tokenizer, token_length) do
+            input = tokenizer.input
+            {token_string, rest} = String.split_at(input, token_length)
+            tokenizer = update_cursor(tokenizer, token_string)
+            %{tokenizer | input: rest}
+          end
+
+          def update_cursor(%__MODULE__{} = tokenizer, <<"">>), do: tokenizer
+
+          def update_cursor(%__MODULE__{} = tokenizer, <<c::utf8, tail::binary>>) when c in @newlines do
+            update_cursor(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 0}, tail)
+          end
+
+          def update_cursor(%__MODULE__{} = tokenizer, <<c::utf8, tail::binary>>) do
+            update_cursor(%{tokenizer | current_line: tokenizer.current_line, current_column: tokenizer.current_column + 1}, tail)
+          end
+
+          def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @newlines do
+            drop_spaces(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 1, input: tail})
+          end
+
+          def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @whitespaces do
+            drop_spaces(%{tokenizer | input: tail, current_column: tokenizer.current_column + 1})
+          end
+
+          def drop_spaces(%__MODULE__{} = tokenizer) do
+            tokenizer
+          end
+        end
+
+        defimpl Enumerable, for: __MODULE__.Tokenizer do
+          def count(_tokenizer), do: {:error, Tokenizer}
+          def member?(_tokenizer, _element), do: {:error, Tokenizer}
+          def slice(_tokenizer), do: {:error, Tokenizer}
+          def reduce(tokenizer, {:halt, acc}, _fun), do: {:halted, acc}
+
+          def reduce(tokenizer, {:cont, acc}, fun) do
+            case Tokenizer.next_token(tokenizer) do
+              {{nil, cursor}, _} ->
+                {:done, acc}
+
+              {token, tokenizer} ->
+                reduce(tokenizer, fun.(token, acc), fun)
+            end
           end
         end
       end
