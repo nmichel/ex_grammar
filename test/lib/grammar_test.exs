@@ -9,6 +9,7 @@ defmodule GrammarTest do
     end
 
     assert {_, "world"} = MySimpleGrammarStrict.parse("hello")
+
     assert_raise RuntimeError, fn ->
       MySimpleGrammarStrict.parse("     ")
     end
@@ -32,10 +33,11 @@ defmodule GrammarTest do
       rule! start("hello", "world"), do: "hello world"
     end
 
-    assert {_, "hello world"} = MySimpleGrammar.parse("""
-      hello
-             world
-    """)
+    assert {_, "hello world"} =
+             MySimpleGrammar.parse("""
+               hello
+                      world
+             """)
 
     assert {_, nil} = MySimpleGrammar.parse("")
 
