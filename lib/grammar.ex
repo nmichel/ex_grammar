@@ -1,21 +1,4 @@
 defmodule Grammar do
-  defprotocol TokenMatcher do
-    @spec match?(t, String.t()) :: boolean()
-    def match?(prototype, token)
-  end
-
-  defimpl TokenMatcher, for: BitString do
-    def match?(token, token) when is_binary(token), do: true
-    def match?(_token, _string), do: false
-  end
-
-  defimpl TokenMatcher, for: Regex do
-    def match?(regex, token) when is_binary(token) do
-      [token] == Regex.run(regex, token)
-    end
-    def match?(_regex, _token), do: false
-  end
-
   defmodule TokenExtractorHelper do
     @spec normalize_regex(Regex.t()) :: Regex.t()
     def normalize_regex(regex) do
@@ -37,6 +20,9 @@ defmodule Grammar do
   defprotocol TokenExtractor do
     @spec try_read(t, String.t()) :: nil | {String.t(), integer()}
     def try_read(token_prototype, input_string)
+
+    @spec match?(t, String.t()) :: boolean()
+    def match?(prototype, token)
   end
 
   defimpl TokenExtractor, for: BitString do
@@ -46,6 +32,9 @@ defmodule Grammar do
         _ -> nil
       end
     end
+
+    def match?(token, token) when is_binary(token), do: true
+    def match?(_token, _string), do: false
   end
 
   defimpl TokenExtractor, for: Regex do
@@ -54,6 +43,11 @@ defmodule Grammar do
       |> TokenExtractorHelper.normalize_regex()
       |> TokenExtractorHelper.try_read_from_regex(input_string)
     end
+
+    def match?(regex, token) when is_binary(token) do
+      [token] == Regex.run(regex, token)
+    end
+    def match?(_regex, _token), do: false
   end
 
   defmodule Clause do
@@ -194,7 +188,7 @@ defmodule Grammar do
           end
 
         {token, tokenizer} ->
-          if Enum.any?(unquote(firsts), &Grammar.TokenMatcher.match?(&1, token)) do
+          if Enum.any?(unquote(firsts), &Grammar.TokenExtractor.match?(&1, token)) do
             fun_in = []
 
             unquote_splicing(build_production_code_for_clause(clause))
@@ -236,7 +230,7 @@ defmodule Grammar do
           raise "No more token"
 
         {token, tokenizer} ->
-          if TokenMatcher.match?(unquote(matcher), token) do
+          if TokenExtractor.match?(unquote(matcher), token) do
             {tokenizer, token}
           else
             raise "Unexpected token #{token}"
@@ -413,10 +407,5 @@ defmodule Grammar do
 
       unquote_splicing(productions)
     end
-    # |> tap(fn ast ->
-    #   ast
-    #   |> Macro.to_string()
-    #   |> IO.puts()
-    # end)
   end
 end

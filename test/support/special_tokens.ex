@@ -3,11 +3,6 @@ defmodule SpecialTokens do
     defstruct ip: nil
   end
 
-  defimpl Grammar.TokenMatcher, for: IP do
-    def match?(%IP{}, %IP{}), do: true
-    def match?(_prototype, _token), do: false
-  end
-
   defimpl Grammar.TokenExtractor, for: IP do
     @pattern ~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/
 
@@ -23,15 +18,19 @@ defmodule SpecialTokens do
           {token, length}
       end
     end
+
+    def match?(%IP{}, %IP{}), do: true
+    def match?(_prototype, _token), do: false
+  end
+
+  defimpl String.Chars, for: IP do
+    def to_string(%IP{ip: [a, b, c, d]}) do
+      "#{a}.#{b}.#{c}.#{d}"
+    end
   end
 
   defmodule Number do
     defstruct number: nil
-  end
-
-  defimpl Grammar.TokenMatcher, for: Number do
-    def match?(%Number{}, %Number{}), do: true
-    def match?(_prototype, _token), do: false
   end
 
   defimpl Grammar.TokenExtractor, for: Number do
@@ -49,15 +48,19 @@ defmodule SpecialTokens do
           {token, length}
       end
     end
+
+    def match?(%Number{}, %Number{}), do: true
+    def match?(_prototype, _token), do: false
+  end
+
+  defimpl String.Chars, for: Number do
+    def to_string(%Number{number: number}) do
+      "#{number}"
+    end
   end
 
   defmodule QuotedString do
     defstruct string: nil
-  end
-
-  defimpl Grammar.TokenMatcher, for: QuotedString do
-    def match?(%QuotedString{}, %QuotedString{}), do: true
-    def match?(_prototype, _token), do: false
   end
 
   defimpl Grammar.TokenExtractor, for: QuotedString do
@@ -72,15 +75,19 @@ defmodule SpecialTokens do
           {token, length}
       end
     end
+
+    def match?(%QuotedString{}, %QuotedString{}), do: true
+    def match?(_prototype, _token), do: false
+  end
+
+  defimpl String.Chars, for: QuotedString do
+    def to_string(%QuotedString{string: string}) do
+      "#{string}"
+    end
   end
 
   defmodule Identifier do
     defstruct string: nil
-  end
-
-  defimpl Grammar.TokenMatcher, for: Identifier do
-    def match?(%Identifier{}, %Identifier{}), do: true
-    def match?(_prototype, _token), do: false
   end
 
   defimpl Grammar.TokenExtractor, for: Identifier do
@@ -94,6 +101,15 @@ defmodule SpecialTokens do
           token = struct(Identifier, string: extracted_string)
           {token, length}
       end
+    end
+
+    def match?(%Identifier{}, %Identifier{}), do: true
+    def match?(_prototype, _token), do: false
+  end
+
+  defimpl String.Chars, for: Identifier do
+    def to_string(%Identifier{string: string}) do
+      "#{string}"
     end
   end
 end
