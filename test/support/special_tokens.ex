@@ -4,13 +4,8 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenMatcher, for: IP do
-    def match?(_ip, token) do
-      r = ~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/
-      case Regex.run(r, token) do
-        [match] when byte_size(match) == byte_size(token) -> true
-        _ -> false
-      end
-    end
+    def match?(%IP{}, %IP{}), do: true
+    def match?(_prototype, _token), do: false
   end
 
   defimpl Grammar.TokenExtractor, for: IP do
@@ -18,6 +13,15 @@ defmodule SpecialTokens do
 
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+      |> case do
+        nil -> nil
+        {extracted_string, length} ->
+          token =
+            extracted_string
+            |> String.split(".")
+            |> then(&struct(IP, ip: &1))
+          {token, length}
+      end
     end
   end
 
@@ -26,13 +30,8 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenMatcher, for: Number do
-    def match?(_ip, token) do
-      r = ~r/^[0-9]+/
-      case Regex.run(r, token) do
-        [match] when byte_size(match) == byte_size(token) -> true
-        _ -> false
-      end
-    end
+    def match?(%Number{}, %Number{}), do: true
+    def match?(_prototype, _token), do: false
   end
 
   defimpl Grammar.TokenExtractor, for: Number do
@@ -40,6 +39,15 @@ defmodule SpecialTokens do
 
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+      |> case do
+        nil -> nil
+        {extracted_string, length} ->
+          token =
+            extracted_string
+            |> String.to_integer()
+            |> then(&struct(Number, number: &1))
+          {token, length}
+      end
     end
   end
 
@@ -48,13 +56,8 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenMatcher, for: QuotedString do
-    def match?(_ip, token) do
-      r = ~r/^"[\S\s]*"/
-      case Regex.run(r, token) do
-        [match] when byte_size(match) == byte_size(token) -> true
-        _ -> false
-      end
-    end
+    def match?(%QuotedString{}, %QuotedString{}), do: true
+    def match?(_prototype, _token), do: false
   end
 
   defimpl Grammar.TokenExtractor, for: QuotedString do
@@ -62,6 +65,12 @@ defmodule SpecialTokens do
 
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+      |> case do
+        nil -> nil
+        {extracted_string, length} ->
+          token = struct(QuotedString, string: extracted_string)
+          {token, length}
+      end
     end
   end
 
@@ -70,13 +79,8 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenMatcher, for: Identifier do
-    def match?(_ip, token) do
-      r = ~r/^[a-zA-Z]+[a-zA-Z0-9_]*/
-      case Regex.run(r, token) do
-        [match] when byte_size(match) == byte_size(token) -> true
-        _ -> false
-      end
-    end
+    def match?(%Identifier{}, %Identifier{}), do: true
+    def match?(_prototype, _token), do: false
   end
 
   defimpl Grammar.TokenExtractor, for: Identifier do
@@ -84,6 +88,12 @@ defmodule SpecialTokens do
 
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+      |> case do
+        nil -> nil
+        {extracted_string, length} ->
+          token = struct(Identifier, string: extracted_string)
+          {token, length}
+      end
     end
   end
 end

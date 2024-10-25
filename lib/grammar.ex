@@ -1,16 +1,19 @@
 defmodule Grammar do
   defprotocol TokenMatcher do
     @spec match?(t, String.t()) :: boolean()
-    def match?(token, string)
+    def match?(prototype, token)
   end
 
   defimpl TokenMatcher, for: BitString do
-    def match?(token, token), do: true
+    def match?(token, token) when is_binary(token), do: true
     def match?(_token, _string), do: false
   end
 
   defimpl TokenMatcher, for: Regex do
-    def match?(regex, token), do: Regex.match?(regex, token)
+    def match?(regex, token) when is_binary(token) do
+      [token] == Regex.run(regex, token)
+    end
+    def match?(_regex, _token), do: false
   end
 
   defmodule TokenExtractorHelper do
@@ -361,7 +364,7 @@ defmodule Grammar do
             {token, l} = extract(input)
 
             if l > 0 do
-              ^token <> rest = input
+              {_token_string, rest} = String.split_at(input, l)
               tokenizer = %{tokenizer | input: rest} |> drop_spaces()
               {token, tokenizer}
             else
