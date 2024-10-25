@@ -9,12 +9,15 @@ defmodule SpecialTokens do
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
       |> case do
-        nil -> nil
+        nil ->
+          nil
+
         {extracted_string, length} ->
           token =
             extracted_string
             |> String.split(".")
             |> then(&struct(IP, ip: &1))
+
           {token, length}
       end
     end
@@ -39,12 +42,15 @@ defmodule SpecialTokens do
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
       |> case do
-        nil -> nil
+        nil ->
+          nil
+
         {extracted_string, length} ->
           token =
             extracted_string
             |> String.to_integer()
             |> then(&struct(Number, number: &1))
+
           {token, length}
       end
     end
@@ -69,7 +75,9 @@ defmodule SpecialTokens do
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
       |> case do
-        nil -> nil
+        nil ->
+          nil
+
         {extracted_string, length} ->
           token = struct(QuotedString, string: extracted_string)
           {token, length}
@@ -96,7 +104,9 @@ defmodule SpecialTokens do
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
       |> case do
-        nil -> nil
+        nil ->
+          nil
+
         {extracted_string, length} ->
           token = struct(Identifier, string: extracted_string)
           {token, length}

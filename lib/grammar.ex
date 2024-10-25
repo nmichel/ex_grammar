@@ -47,6 +47,7 @@ defmodule Grammar do
     def match?(regex, token) when is_binary(token) do
       [token] == Regex.run(regex, token)
     end
+
     def match?(_regex, _token), do: false
   end
 
@@ -180,11 +181,11 @@ defmodule Grammar do
   def build_production_for_clause(%Clause{firsts: firsts, blk: blk, epsilon: epsilon} = clause, nested_ast) do
     quote do
       case Tokenizer.current_token(tokenizer) do
-        {nil, _tokenizer} ->
+        {nil, tokenizer} ->
           if unquote(epsilon) do
             {tokenizer, nil}
           else
-            raise "No more token"
+            raise "[#{tokenizer.current_line}] cannot find token"
           end
 
         {token, tokenizer} ->
@@ -226,14 +227,14 @@ defmodule Grammar do
   def build_production_code_for_clause_elem(matcher) do
     quote do
       case Tokenizer.next_token(tokenizer) do
-        {nil, _tokenizer} ->
-          raise "No more token"
+        {nil, tokenizer} ->
+          raise "[#{tokenizer.current_line}] cannot find token"
 
         {token, tokenizer} ->
           if TokenExtractor.match?(unquote(matcher), token) do
             {tokenizer, token}
           else
-            raise "Unexpected token #{token}"
+            raise "[#{tokenizer.current_line} | #{tokenizer.current_column}] Unexpected token #{token}"
           end
       end
     end
@@ -241,7 +242,7 @@ defmodule Grammar do
 
   def no_clause() do
     quote do
-      raise "No clause matched"
+      raise "[#{tokenizer.current_line} | #{tokenizer.current_column}] No clause matched"
     end
   end
 
@@ -340,8 +341,10 @@ defmodule Grammar do
       quote do
         defmodule Tokenizer do
           @enforce_keys [:input]
-          defstruct input: ""
+          defstruct input: "", current_line: 1, current_column: 1
 
+          @newlines ~c[\n]
+          @whitespaces ~c[ \t\v\f\r]
           @extractors [unquote_splicing(token_templates)]
 
           def new(input) when is_binary(input) do
@@ -358,8 +361,18 @@ defmodule Grammar do
             {token, l} = extract(input)
 
             if l > 0 do
-              {_token_string, rest} = String.split_at(input, l)
-              tokenizer = %{tokenizer | input: rest} |> drop_spaces()
+              {token_string, rest} = String.split_at(input, l)
+              dropped_lines_count = String.graphemes(token_string) |> Enum.filter(&(&1 in @newlines)) |> Enum.count()
+
+              tokenizer =
+                %{
+                  tokenizer
+                  | input: rest,
+                    current_line: tokenizer.current_line + dropped_lines_count,
+                    current_column: tokenizer.current_column + l
+                }
+                |> drop_spaces()
+
               {token, tokenizer}
             else
               {nil, tokenizer}
@@ -377,9 +390,16 @@ defmodule Grammar do
             end)
           end
 
-          def drop_spaces(%__MODULE__{input: input} = tokenizer) do
-            trimed = Regex.replace(~r/^\s+/, input, "", global: false)
-            %{tokenizer | input: trimed}
+          def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @newlines do
+            drop_spaces(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 1, input: tail})
+          end
+
+          def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @whitespaces do
+            drop_spaces(%{tokenizer | input: tail, current_column: tokenizer.current_column + 1})
+          end
+
+          def drop_spaces(%__MODULE__{} = tokenizer) do
+            tokenizer
           end
         end
       end
