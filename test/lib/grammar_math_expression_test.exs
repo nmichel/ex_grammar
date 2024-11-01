@@ -13,12 +13,12 @@ defmodule GrammarMathExpressionTest do
       join_non_nil(params)
     end
 
-    rule! expression_cont("+", :term, :expression_cont) do
+    rule? expression_cont("+", :term, :expression_cont) do
       [_, term, cont] = params
       join_non_nil(["plus", term, cont])
     end
 
-    rule! expression_cont("-", :term, :expression_cont) do
+    rule? expression_cont("-", :term, :expression_cont) do
       [_, term, cont] = params
       join_non_nil(["moins", term, cont])
     end
@@ -27,12 +27,12 @@ defmodule GrammarMathExpressionTest do
       join_non_nil(params)
     end
 
-    rule! term_cont("*", :factor, :term_cont) do
+    rule? term_cont("*", :factor, :term_cont) do
       [_, factor, cont] = params
       join_non_nil(["multiplié par", factor, cont])
     end
 
-    rule! term_cont("/", :factor, :term_cont) do
+    rule? term_cont("/", :factor, :term_cont) do
       [_, factor, cont] = params
       join_non_nil(["divisé par", factor, cont])
     end

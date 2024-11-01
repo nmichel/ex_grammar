@@ -24,12 +24,12 @@ defmodule NumberListReader do
     end
   end
 
-  rule! list_tail(:number, :list_tail_tail) do
+  rule? list_tail(:number, :list_tail_tail) do
     [number, list] = params
     [number | (list || [])]
   end
 
-  rule! list_tail_tail(",", :number, :list_tail_tail) do
+  rule? list_tail_tail(",", :number, :list_tail_tail) do
     [_, number, list] = params
     [number | (list || [])]
   end
@@ -59,12 +59,12 @@ defmodule MathExpressionTranslator do
     join_non_nil(params)
   end
 
-  rule! expression_cont("+", :term, :expression_cont) do
+  rule? expression_cont("+", :term, :expression_cont) do
     [_, term, cont] = params
     join_non_nil(["plus", term, cont])
   end
 
-  rule! expression_cont("-", :term, :expression_cont) do
+  rule? expression_cont("-", :term, :expression_cont) do
     [_, term, cont] = params
     join_non_nil(["moins", term, cont])
   end
@@ -73,12 +73,12 @@ defmodule MathExpressionTranslator do
     join_non_nil(params)
   end
 
-  rule! term_cont("*", :factor, :term_cont) do
+  rule? term_cont("*", :factor, :term_cont) do
     [_, factor, cont] = params
     join_non_nil(["multiplié par", factor, cont])
   end
 
-  rule! term_cont("/", :factor, :term_cont) do
+  rule? term_cont("/", :factor, :term_cont) do
     [_, factor, cont] = params
     join_non_nil(["divisé par", factor, cont])
   end
@@ -156,7 +156,7 @@ defmodule IPListReader do
     [ip | (tail || [])]
   end
 
-  rule! ips_tail(",", %IP{}, :ips_tail) do
+  rule? ips_tail(",", %IP{}, :ips_tail) do
     [_, ip, tail] = params
     [ip | (tail || [])]
   end

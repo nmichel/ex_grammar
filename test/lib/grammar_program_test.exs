@@ -15,17 +15,17 @@ defmodule GrammarProgramTest do
         "#{assignment}\n#{cont}"
       end
 
-      rule! program_cont(:assignment, :program_cont) do
+      rule? program_cont(:assignment, :program_cont) do
         [assignment, cont] = params
         "#{assignment}\n#{cont}"
       end
 
-      rule! assignment(:multi_line_comment) do
+      rule? assignment(:multi_line_comment) do
         [comment] = params
         "#{comment}\n"
       end
 
-      rule! assignment(:identifier, "=", :rhv) do
+      rule? assignment(:identifier, "=", :rhv) do
         [identifier, _, expr] = params
         "#{identifier} égal à #{expr}"
       end
@@ -45,12 +45,12 @@ defmodule GrammarProgramTest do
         "#{term} #{cont}"
       end
 
-      rule! expression_cont("+", :term, :expression_cont) do
+      rule? expression_cont("+", :term, :expression_cont) do
         [_, term, cont] = params
         "plus #{term} #{cont}"
       end
 
-      rule! expression_cont("-", :term, :expression_cont) do
+      rule? expression_cont("-", :term, :expression_cont) do
         [_, term, cont] = params
         "moins #{term} #{cont}"
       end
@@ -60,12 +60,12 @@ defmodule GrammarProgramTest do
         "#{factor} #{cont}"
       end
 
-      rule! term_cont("*", :factor, :term_cont) do
+      rule? term_cont("*", :factor, :term_cont) do
         [_, factor, cont] = params
         "multiplié par #{factor} #{cont}"
       end
 
-      rule! term_cont("/", :factor, :term_cont) do
+      rule? term_cont("/", :factor, :term_cont) do
         [_, factor, cont] = params
         "divisé par #{factor} #{cont}"
       end

@@ -289,7 +289,7 @@ defmodule Grammar do
 
   defmacro rule({name, meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, meta, def, blk, false)
 
-  defmacro rule!({name, meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, meta, def, blk, true)
+  defmacro rule?({name, meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, meta, def, blk, true)
 
   defmacro __using__(_opts) do
     quote do

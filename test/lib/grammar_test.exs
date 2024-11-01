@@ -19,7 +19,7 @@ defmodule GrammarTest do
     defmodule MySimpleGrammarRelaxed do
       use Grammar
 
-      rule! start("hello"), do: "world"
+      rule? start("hello"), do: "world"
     end
 
     assert {_, "world"} = MySimpleGrammarRelaxed.parse("hello")
@@ -30,7 +30,7 @@ defmodule GrammarTest do
     defmodule MySimpleGrammar do
       use Grammar
 
-      rule! start("hello", "world"), do: "hello world"
+      rule? start("hello", "world"), do: "hello world"
     end
 
     assert {_, "hello world"} =

@@ -1,4 +1,4 @@
-locals_without_parens = [rule: 2, rule!: 2]
+locals_without_parens = [rule: 2, rule?: 2]
 
 [
   inputs: ["{mix,.formatter}.exs", "{lib,test}/**/*.{ex,exs}"],
