@@ -1,5 +1,8 @@
 defmodule Grammar do
   defmodule TokenExtractorHelper do
+    @moduledoc """
+    This module provides helper functions to work with TokenExtractor implementations using Regex.
+    """
     @spec normalize_regex(Regex.t()) :: Regex.t()
     def normalize_regex(regex) do
       source = Regex.source(regex)
@@ -55,6 +58,14 @@ defmodule Grammar do
   end
 
   defmodule Clause do
+    @moduledoc """
+    A Clause entity represents a grammar clause, by its definition and the block to execute.
+
+    The definition is a list of steps, which can be either a rule name or a token prototype.
+
+    The block is the code to execute when the clause is fully matched. In this code block,
+    the binding `params` is available and contains the results of the clause steps.
+    """
     @enforce_keys [:def, :blk, :epsilon]
     defstruct def: nil, firsts: nil, blk: nil, epsilon: false
 
@@ -62,7 +73,7 @@ defmodule Grammar do
       struct(__MODULE__, def: def, blk: blk, epsilon: epsilon)
     end
 
-    def is_epsilon(%__MODULE__{epsilon: epsilon}), do: epsilon
+    def epsilon?(%__MODULE__{epsilon: epsilon}), do: epsilon
 
     def set_firsts(%__MODULE__{firsts: nil} = clause, firsts) when is_list(firsts) do
       %{clause | firsts: firsts}
@@ -70,6 +81,9 @@ defmodule Grammar do
   end
 
   defmodule Rule do
+    @moduledoc """
+    A Rule entity represents a grammar rule, by its name and the list of clauses.
+    """
     @enforce_keys [:name, :clauses]
     defstruct [:name, :clauses]
 
@@ -170,8 +184,8 @@ defmodule Grammar do
   end
 
   def build_production_for_rule({name, %Rule{name: name, clauses: clauses}}) do
-    is_epsilon = Enum.any?(clauses, &Clause.is_epsilon/1)
-    no_clause = (is_epsilon && epsilon_clause()) || no_clause()
+    epsilon? = Enum.any?(clauses, &Clause.epsilon?/1)
+    no_clause = (epsilon? && epsilon_clause()) || no_clause()
     nested_clauses = Enum.reduce(clauses, no_clause, &build_production_for_clause(&1, &2))
 
     quote do
@@ -199,6 +213,7 @@ defmodule Grammar do
 
             fun_out =
               (fn var!(params) ->
+                 _ = var!(params)
                  unquote(blk)
                end).(fun_in)
 
@@ -243,13 +258,13 @@ defmodule Grammar do
     end
   end
 
-  def no_clause() do
+  def no_clause do
     quote do
       raise "[#{tokenizer.current_line} | #{tokenizer.current_column}] No clause matched"
     end
   end
 
-  def epsilon_clause() do
+  def epsilon_clause do
     quote do
       {tokenizer, nil}
     end
@@ -284,6 +299,111 @@ defmodule Grammar do
         )
 
       Module.put_attribute(unquote(module), :rules, rules)
+    end
+  end
+
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
+  defp build_tokenizer(token_templates_ast) do
+    quote do
+      defmodule Tokenizer do
+        @moduledoc """
+        This module implements the tokenizer for your very specific grammar. It is derived
+        from the list of tokens that are used in the grammar rules.
+        """
+
+        @enforce_keys [:input]
+        defstruct input: "", current_line: 1, current_column: 1
+
+        @newlines ~c[\n]
+        @whitespaces ~c[ \t\v\f\r]
+        @extractors [unquote_splicing(token_templates_ast)]
+
+        def new(input) when is_binary(input) do
+          struct(__MODULE__, input: input)
+          |> drop_spaces()
+        end
+
+        def current_token(%__MODULE__{input: input} = tokenizer) do
+          {token, _} = try_read_token(tokenizer)
+          {token, tokenizer}
+        end
+
+        def next_token(%__MODULE__{input: input} = tokenizer) do
+          case try_read_token(tokenizer) do
+            {token, 0} ->
+              {token, tokenizer}
+
+            {token, token_length} ->
+              tokenizer =
+                tokenizer
+                |> consume_token(token_length)
+                |> drop_spaces()
+
+              {token, tokenizer}
+          end
+        end
+
+        def try_read_token(%__MODULE__{} = tokenizer) do
+          input = tokenizer.input
+          cursor = {tokenizer.current_line, tokenizer.current_column}
+
+          @extractors
+          |> Enum.reduce({nil, 0}, fn token_template, {current_token, current_length} ->
+            case TokenExtractor.try_read(token_template, input) do
+              nil -> {current_token, current_length}
+              {token, length} when length > current_length -> {token, length}
+              _found_tuple -> {current_token, current_length}
+            end
+          end)
+          |> then(fn {token, length} -> {{token, cursor}, length} end)
+        end
+
+        def consume_token(%__MODULE__{} = tokenizer, token_length) do
+          input = tokenizer.input
+          {token_string, rest} = String.split_at(input, token_length)
+          tokenizer = update_cursor(tokenizer, token_string)
+          %{tokenizer | input: rest}
+        end
+
+        def update_cursor(%__MODULE__{} = tokenizer, <<"">>), do: tokenizer
+
+        def update_cursor(%__MODULE__{} = tokenizer, <<c::utf8, tail::binary>>) when c in @newlines do
+          update_cursor(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 0}, tail)
+        end
+
+        def update_cursor(%__MODULE__{} = tokenizer, <<c::utf8, tail::binary>>) do
+          update_cursor(%{tokenizer | current_line: tokenizer.current_line, current_column: tokenizer.current_column + 1}, tail)
+        end
+
+        def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @newlines do
+          drop_spaces(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 1, input: tail})
+        end
+
+        def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @whitespaces do
+          drop_spaces(%{tokenizer | input: tail, current_column: tokenizer.current_column + 1})
+        end
+
+        def drop_spaces(%__MODULE__{} = tokenizer) do
+          tokenizer
+        end
+      end
+
+      defimpl Enumerable, for: __MODULE__.Tokenizer do
+        def count(_tokenizer), do: {:error, Tokenizer}
+        def member?(_tokenizer, _element), do: {:error, Tokenizer}
+        def slice(_tokenizer), do: {:error, Tokenizer}
+        def reduce(tokenizer, {:halt, acc}, _fun), do: {:halted, acc}
+
+        def reduce(tokenizer, {:cont, acc}, fun) do
+          case Tokenizer.next_token(tokenizer) do
+            {{nil, cursor}, _} ->
+              {:done, acc}
+
+            {token, tokenizer} ->
+              reduce(tokenizer, fun.(token, acc), fun)
+          end
+        end
+      end
     end
   end
 
@@ -340,103 +460,9 @@ defmodule Grammar do
     #
     token_templates = build_token_list(rules_with_firsts)
 
-    tokenizer =
-      quote do
-        defmodule Tokenizer do
-          @enforce_keys [:input]
-          defstruct input: "", current_line: 1, current_column: 1
-
-          @newlines ~c[\n]
-          @whitespaces ~c[ \t\v\f\r]
-          @extractors [unquote_splicing(token_templates)]
-
-          def new(input) when is_binary(input) do
-            struct(__MODULE__, input: input)
-            |> drop_spaces()
-          end
-
-          def current_token(%__MODULE__{input: input} = tokenizer) do
-            {token, _} = try_read_token(tokenizer)
-            {token, tokenizer}
-          end
-
-          def next_token(%__MODULE__{input: input} = tokenizer) do
-            case try_read_token(tokenizer) do
-              {token, 0} ->
-                {token, tokenizer}
-
-              {token, token_length} ->
-                tokenizer =
-                  tokenizer
-                  |> consume_token(token_length)
-                  |> drop_spaces()
-
-                {token, tokenizer}
-            end
-          end
-
-          def try_read_token(%__MODULE__{} = tokenizer) do
-            input = tokenizer.input
-            cursor = {tokenizer.current_line, tokenizer.current_column}
-
-            @extractors
-            |> Enum.reduce({nil, 0}, fn token_template, {current_token, current_length} ->
-              case TokenExtractor.try_read(token_template, input) do
-                nil -> {current_token, current_length}
-                {token, length} when length > current_length -> {token, length}
-                _found_tuple -> {current_token, current_length}
-              end
-            end)
-            |> then(fn {token, length} -> {{token, cursor}, length} end)
-          end
-
-          def consume_token(%__MODULE__{} = tokenizer, token_length) do
-            input = tokenizer.input
-            {token_string, rest} = String.split_at(input, token_length)
-            tokenizer = update_cursor(tokenizer, token_string)
-            %{tokenizer | input: rest}
-          end
-
-          def update_cursor(%__MODULE__{} = tokenizer, <<"">>), do: tokenizer
-
-          def update_cursor(%__MODULE__{} = tokenizer, <<c::utf8, tail::binary>>) when c in @newlines do
-            update_cursor(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 0}, tail)
-          end
-
-          def update_cursor(%__MODULE__{} = tokenizer, <<c::utf8, tail::binary>>) do
-            update_cursor(%{tokenizer | current_line: tokenizer.current_line, current_column: tokenizer.current_column + 1}, tail)
-          end
-
-          def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @newlines do
-            drop_spaces(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 1, input: tail})
-          end
-
-          def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @whitespaces do
-            drop_spaces(%{tokenizer | input: tail, current_column: tokenizer.current_column + 1})
-          end
-
-          def drop_spaces(%__MODULE__{} = tokenizer) do
-            tokenizer
-          end
-        end
-
-        defimpl Enumerable, for: __MODULE__.Tokenizer do
-          def count(_tokenizer), do: {:error, Tokenizer}
-          def member?(_tokenizer, _element), do: {:error, Tokenizer}
-          def slice(_tokenizer), do: {:error, Tokenizer}
-          def reduce(tokenizer, {:halt, acc}, _fun), do: {:halted, acc}
-
-          def reduce(tokenizer, {:cont, acc}, fun) do
-            case Tokenizer.next_token(tokenizer) do
-              {{nil, cursor}, _} ->
-                {:done, acc}
-
-              {token, tokenizer} ->
-                reduce(tokenizer, fun.(token, acc), fun)
-            end
-          end
-        end
-      end
+    # Generate the tokenizer module from the token templates
+    #
+    tokenizer = build_tokenizer(token_templates)
 
     # Generate parser functions
     #

@@ -1,5 +1,9 @@
 defmodule SpecialTokens do
+  @moduledoc """
+  This module defines special tokens that are not included in the standard library, primarily for testing purposes.
+  """
   defmodule IP do
+    @moduledoc false
     defstruct ip: nil
   end
 
@@ -33,6 +37,7 @@ defmodule SpecialTokens do
   end
 
   defmodule Number do
+    @moduledoc false
     defstruct number: nil
   end
 
@@ -66,6 +71,7 @@ defmodule SpecialTokens do
   end
 
   defmodule QuotedString do
+    @moduledoc false
     defstruct string: nil
   end
 
@@ -95,6 +101,7 @@ defmodule SpecialTokens do
   end
 
   defmodule Identifier do
+    @moduledoc false
     defstruct string: nil
   end
 

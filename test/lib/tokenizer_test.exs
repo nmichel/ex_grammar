@@ -46,19 +46,19 @@ defmodule TokenizerTest do
       end
     end
 
-    tokenizer = MyGrammar.Tokenizer.new("  coucou
+    tokenizer = MyGrammar.Tokenizer.new(~S/  coucou
       1234
-        \"blablabla coucou 12234\“
-    \"\"\"
+        "blablabla coucou 12234"
+    """
         bla  bla
-       \"\"\"
-        re 12
-    ")
+       """
+       re 12
+    /)
 
     assert [
              {"12", {7, 11}},
              {"re", {7, 8}},
-             {"\"blablabla coucou 12234“\n    \"\"\"\n        bla  bla\n       \"\"\"", {3, 9}},
+             {"\"blablabla coucou 12234\"\n    \"\"\"\n        bla  bla\n       \"\"\"", {3, 9}},
              {"1234", {2, 7}},
              {"coucou", {1, 3}}
            ] = Enum.reduce(tokenizer, [], fn e, a -> [e | a] end)

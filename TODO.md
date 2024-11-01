@@ -1,5 +1,5 @@
-- [x] Merge TokenMatcher and TokenExtractor
 - Use line info from metada in error reporting
 - Don't raise, better throw, and convert into a {:error, bla} return value for parse/1
 - Make the upper behavior optional, using a opt when "using" Grammar module
-- [x] Remove nasty IO.inspect() and IO.puts() :) 
+- Make spaces dropping an optional behaviour
+- Split code related to code generation in dedicated modules

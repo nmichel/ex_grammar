@@ -4,10 +4,10 @@ defmodule GrammarSpecialTokensTest do
   defmodule MyGrammar do
     use Grammar
 
+    alias SpecialTokens.Identifier
     alias SpecialTokens.IP
     alias SpecialTokens.Number
     alias SpecialTokens.QuotedString
-    alias SpecialTokens.Identifier
 
     rule program(:assignment) do
       [assignment] = params
