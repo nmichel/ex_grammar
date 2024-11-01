@@ -1,5 +1,6 @@
 defmodule GrammarTest do
   use ExUnit.Case
+  doctest Grammar
 
   test "simplest strict" do
     defmodule MySimpleGrammarStrict do

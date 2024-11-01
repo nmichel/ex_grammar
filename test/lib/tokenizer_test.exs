@@ -1,6 +1,8 @@
 defmodule TokenizerTest do
   use ExUnit.Case
 
+  doctest Grammar.TokenExtractor
+
   test "test tokenizer" do
     defmodule MyGrammar do
       use Grammar

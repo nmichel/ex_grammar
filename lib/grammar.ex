@@ -1,4 +1,22 @@
 defmodule Grammar do
+  @moduledoc """
+  This module provides a DSL to define parser of structured inputs. Parsers are defined as a grammar.
+
+  Grammar defined must be LL(1) grammars, i.e. they must be unambiguous and have a single token lookahead.
+
+  The grammar is defined by a set of rules, each rule being a set of clauses. Clauses must be understood as
+  disjoinded paths in the rule resolution, or as the `or` operator in the classic notation.
+
+  The tokenization process relies on the TokenExtractor protocol, which is used to extract tokens from the input string.
+  This protocol is implemented for BitString and Regex, and can be extended to custom token types.
+
+  To declare a parser module, just `use` the Grammar module in your module, and define your rules using the `rule` and `rule?` macro.
+  The newly defined module will expose a `parse/1` function that will parse the input string, and return a tuple with the
+  tokenizer in its final state, and result.
+
+  See `rule/2` for a full example.
+  """
+
   defmodule TokenExtractorHelper do
     @moduledoc """
     This module provides helper functions to work with TokenExtractor implementations using Regex.
@@ -24,10 +42,54 @@ defmodule Grammar do
   end
 
   defprotocol TokenExtractor do
+    @moduledoc """
+    This protocol exposes the functions needed to extract tokens from the input string.
+    """
+
+    @doc """
+    Try to read a token from the input string.
+
+    If the token is found, returns the token and its length in the input string.
+    Returns nil otherwise.
+
+    ## Example
+
+        iex> Grammar.TokenExtractor.try_read("hello", "hello world")
+        {"hello", 5}
+
+        iex> Grammar.TokenExtractor.try_read("Hello", "hello world")
+        nil
+
+        iex> Grammar.TokenExtractor.try_read(~r/[0-9]+/, "013456toto")
+        {"013456", 6}
+
+        iex> Grammar.TokenExtractor.try_read(~r/[a-z]+/, "013456toto")
+        nil
+    """
     @spec try_read(t, String.t()) :: nil | {String.t(), integer()}
     def try_read(token_prototype, input_string)
 
-    @spec match?(t, String.t()) :: boolean()
+    @doc """
+    Returns true if the token matches the token prototype.
+
+    This function is used orient the parser in the right clause of a rule, by comparing the current token
+    to the clause list of first tokens.
+
+    ## Example
+
+        iex> Grammar.TokenExtractor.match?("hello", "hello")
+        true
+
+        iex> Grammar.TokenExtractor.match?("hello", "Horld")
+        false
+
+        iex> Grammar.TokenExtractor.match?(~r/[0-9]+/, "013456")
+        true
+
+        iex> Grammar.TokenExtractor.match?(~r/[0-9]+/, "a013456")
+        false
+    """
+    @spec match?(t, term()) :: boolean()
     def match?(prototype, token)
   end
 
@@ -407,7 +469,74 @@ defmodule Grammar do
     end
   end
 
+  @doc """
+  Use this macro to define rules of your grammar.
+
+  **The first rule defined will be the entry rule of the grammar**.
+
+  Calls to this macro sharing the same name will be grouped together as they define the same rule,
+  each call is a possible path in the rule resolution.
+
+  Lets name a single call to `rule` a clause.
+  All clauses must be disjointed, i.e. they must not share the same first token.
+  They can be understood as the `or` operator in a rule.
+
+  Each rule of rule clause is defined by
+  - a name, which is an atom
+  - a definition, which is a list of atoms or token prototypes
+  - a block, which is the code to execute when the clause is fully matched
+
+  When executed the code block is provided with a `params` binding, which is a list of the results of the clause steps.
+
+  In the case where a `rule` cannot be matched, a `RuntimeError` is raised (see `rule?/2` for a relaxed version).
+
+  ## Example
+
+      defmodule NumberOfNameListParser do
+        use Grammar
+
+        rule start("[", :list_or_empty_list) do
+          [_, list] = params
+          list || []
+        end
+
+        rule? list_or_empty_list(:item, :list_tail, "]") do
+          [item, list_tail, _] = params
+          [item | (list_tail || [])]
+        end
+
+        rule? list_tail(",", :item, :list_tail) do
+          [_, item, list_tail] = params
+          [item | (list_tail || [])]
+        end
+
+        rule item(~r/[0-9]+/) do
+          [number] = params
+          String.to_integer(number)
+        end
+
+        rule item(~r/[a-zA-Z]+/) do
+          [string] = params
+          string
+        end
+      end
+
+      NumberOfNameListParser.parse("[1, toto, 23]")
+      {%NumberOfNameListParser.Tokenizer{
+        input: "",
+        current_line: 1,
+        current_column: 14
+      }, [1, "toto", 23]}
+  """
   defmacro rule({name, meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, meta, def, blk, false)
+
+  @doc """
+  Same as `rule/2` but relaxed : if the rule cannot be matched, it will be valued as `nil`.
+
+  Useful for optional or recursive rules.
+
+  See example in `rule/2`.
+  """
 
   defmacro rule?({name, meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, meta, def, blk, true)
 
