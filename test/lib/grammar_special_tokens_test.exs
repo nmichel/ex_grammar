@@ -56,11 +56,11 @@ defmodule GrammarSpecialTokensTest do
   end
 
   test "grammar with special tokens" do
-    assert {_, "assigne le nombre 12 à un_nombre"} = GrammarSpecialTokensTest.MyGrammar.parse("un_nombre = 12")
+    assert {:ok, "assigne le nombre 12 à un_nombre"} = GrammarSpecialTokensTest.MyGrammar.parse("un_nombre = 12")
 
-    assert {_, "assigne la chaîne \"ceci est une chaîne\" à une_chaine"} =
+    assert {:ok, "assigne la chaîne \"ceci est une chaîne\" à une_chaine"} =
              GrammarSpecialTokensTest.MyGrammar.parse("une_chaine = \"ceci est une chaîne\"")
 
-    assert {_, "assigne l'adresse IP 12.12.3.4 à une_ip"} = GrammarSpecialTokensTest.MyGrammar.parse("une_ip = 12.12.3.4")
+    assert {:ok, "assigne l'adresse IP 12.12.3.4 à une_ip"} = GrammarSpecialTokensTest.MyGrammar.parse("une_ip = 12.12.3.4")
   end
 end

@@ -3,51 +3,51 @@ defmodule TokenizerTest do
 
   doctest Grammar.TokenExtractor
 
-  test "test tokenizer" do
-    defmodule MyGrammar do
-      use Grammar
+  defmodule MyGrammar do
+    use Grammar
 
-      rule start(:number) do
-        [number] = params
-        number
-      end
-
-      rule start(:identifier) do
-        [identifier] = params
-        identifier
-      end
-
-      rule start(:string) do
-        [string] = params
-        string
-      end
-
-      rule start(:multi_line_comment) do
-        [comment] = params
-        comment
-      end
-
-      rule number(~r/[0-9]+/) do
-        [number] = params
-        number
-      end
-
-      rule identifier(~r/[a-zA-Z]+[a-zA-Z0-9]*/) do
-        [string] = params
-        string
-      end
-
-      rule string(~r/"[\S\s]*"/) do
-        [string] = params
-        string
-      end
-
-      rule multi_line_comment(~r/""".*?"""/s) do
-        [string] = params
-        string
-      end
+    rule start(:number) do
+      [number] = params
+      number
     end
 
+    rule start(:identifier) do
+      [identifier] = params
+      identifier
+    end
+
+    rule start(:string) do
+      [string] = params
+      string
+    end
+
+    rule start(:multi_line_comment) do
+      [comment] = params
+      comment
+    end
+
+    rule number(~r/[0-9]+/) do
+      [number] = params
+      number
+    end
+
+    rule identifier(~r/[a-zA-Z]+[a-zA-Z0-9]*/) do
+      [string] = params
+      string
+    end
+
+    rule string(~r/"[\S\s]*"/) do
+      [string] = params
+      string
+    end
+
+    rule multi_line_comment(~r/""".*?"""/s) do
+      [string] = params
+      string
+    end
+  end
+
+  test "test tokenizer" do
     tokenizer = MyGrammar.Tokenizer.new(~S/  coucou
       1234
         "blablabla coucou 12234"

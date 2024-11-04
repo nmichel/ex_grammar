@@ -264,10 +264,10 @@ defmodule Grammar do
           if unquote(epsilon) do
             {tokenizer, nil}
           else
-            raise "[#{inspect(cursor)}] : cannot find token"
+            throw({cursor, :no_token})
           end
 
-        {{token, _cursor}, tokenizer} ->
+        {{token, cursor}, tokenizer} ->
           if Enum.any?(unquote(firsts), &Grammar.TokenExtractor.match?(&1, token)) do
             fun_in = []
 
@@ -308,13 +308,13 @@ defmodule Grammar do
     quote do
       case Tokenizer.next_token(tokenizer) do
         {{nil, cursor}, tokenizer} ->
-          raise "[#{inspect(cursor)}] : cannot find token"
+          throw({cursor, :no_token})
 
         {{token, cursor}, tokenizer} ->
           if TokenExtractor.match?(unquote(matcher), token) do
             {tokenizer, token}
           else
-            raise "[#{inspect(cursor)}] : unexpected token #{token}"
+            throw({cursor, :unexpected_token, token})
           end
       end
     end
@@ -322,7 +322,7 @@ defmodule Grammar do
 
   def no_clause do
     quote do
-      raise "[#{tokenizer.current_line} | #{tokenizer.current_column}] No clause matched"
+      throw({cursor, :no_clause_matched})
     end
   end
 
@@ -609,9 +609,19 @@ defmodule Grammar do
         unquote(Macro.escape(rules_with_firsts))
       end
 
+      @spec parse(binary()) :: {:ok, term()} | {:error, {integer(), integer()}, atom()} | {:error, {integer(), integer()}, atom(), term()}
       def parse(input) do
-        tokenizer = __MODULE__.Tokenizer.new(input)
-        unquote(start.name)(tokenizer)
+        try do
+          tokenizer = __MODULE__.Tokenizer.new(input)
+          {tokenizer_final, value} = unquote(start.name)(tokenizer)
+          {:ok, value}
+        catch
+          {where, what} = error ->
+            {:error, where, what}
+
+          {where, what, data} = error ->
+            {:error, where, what, data}
+        end
       end
 
       unquote_splicing(productions)

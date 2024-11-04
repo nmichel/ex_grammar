@@ -58,13 +58,21 @@ defmodule GrammarMathExpressionTest do
   end
 
   test "math expression grammar are parsed and rewriten" do
-    assert {_, "1 plus 2"} = MathExpressionGrammar.parse("1 + 2")
-    assert {_, "(1 plus 2)"} = MathExpressionGrammar.parse("(  1 +2 )   ")
-    assert {_, "1 moins 2"} = MathExpressionGrammar.parse("1 - 2")
-    assert {_, "1 moins (2 multiplié par (3 plus 4)) divisé par 5"} = MathExpressionGrammar.parse("1 - (2 * (3 + 4)) / 5")
+    assert {:ok, "1 plus 2"} = MathExpressionGrammar.parse("1 + 2")
+    assert {:ok, "(1 plus 2)"} = MathExpressionGrammar.parse("(  1 +2 )   ")
+    assert {:ok, "1 moins 2"} = MathExpressionGrammar.parse("1 - 2")
+    assert {:ok, "1 moins (2 multiplié par (3 plus 4)) divisé par 5"} = MathExpressionGrammar.parse("1 - (2 * (3 + 4)) / 5")
   end
 
-  test "" do
-    assert_raise RuntimeError, fn -> MathExpressionGrammar.parse("1 +") end
+  test "catch incomplete expression" do
+    assert {:error, {1, 4}, :no_token} = MathExpressionGrammar.parse("1 +")
+  end
+
+  test "catch invalid expression with valid token" do
+    assert {:error, {1, 5}, :no_clause_matched} = MathExpressionGrammar.parse("1 + /")
+  end
+
+  test "catch invalid expression with invalid token" do
+    assert {:error, {1, 5}, :no_token} = MathExpressionGrammar.parse("1 + toto")
   end
 end

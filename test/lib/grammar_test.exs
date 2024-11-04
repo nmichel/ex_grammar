@@ -9,11 +9,9 @@ defmodule GrammarTest do
       rule start("hello"), do: "world"
     end
 
-    assert {_, "world"} = MySimpleGrammarStrict.parse("hello")
+    assert {:ok, "world"} = MySimpleGrammarStrict.parse("hello")
 
-    assert_raise RuntimeError, fn ->
-      MySimpleGrammarStrict.parse("     ")
-    end
+    assert {:error, {1, 6}, :no_token} = MySimpleGrammarStrict.parse("     ")
   end
 
   test "simplest relaxed" do
@@ -23,8 +21,8 @@ defmodule GrammarTest do
       rule? start("hello"), do: "world"
     end
 
-    assert {_, "world"} = MySimpleGrammarRelaxed.parse("hello")
-    assert {_, nil} = MySimpleGrammarRelaxed.parse("")
+    assert {:ok, "world"} = MySimpleGrammarRelaxed.parse("hello")
+    assert {:ok, nil} = MySimpleGrammarRelaxed.parse("")
   end
 
   test "two words and spaces" do
@@ -34,16 +32,14 @@ defmodule GrammarTest do
       rule? start("hello", "world"), do: "hello world"
     end
 
-    assert {_, "hello world"} =
+    assert {:ok, "hello world"} =
              MySimpleGrammar.parse("""
                hello
                       world
              """)
 
-    assert {_, nil} = MySimpleGrammar.parse("")
+    assert {:ok, nil} = MySimpleGrammar.parse("")
 
-    assert_raise RuntimeError, fn ->
-      MySimpleGrammar.parse("hello")
-    end
+    assert {:error, {1, 6}, :no_token} = MySimpleGrammar.parse("hello")
   end
 end
