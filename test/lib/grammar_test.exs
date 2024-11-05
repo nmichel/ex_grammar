@@ -42,4 +42,32 @@ defmodule GrammarTest do
 
     assert {:error, {1, 6}, :no_token} = MySimpleGrammar.parse("hello")
   end
+
+  test "spaces are meaningful when not dropped" do
+    defmodule MySimpleGrammar do
+      use Grammar, drop_spaces: false
+
+      rule start("hello", "world"), do: "hello world"
+    end
+
+    assert {:error, {1, 1}, :no_token} =
+             MySimpleGrammar.parse("""
+               hello
+                      world
+             """)
+  end
+
+  test "spaces are meaningful when not dropped (relaxed version)" do
+    defmodule MySimpleGrammar do
+      use Grammar, drop_spaces: false
+
+      rule? start("hello", "world"), do: "hello world"
+    end
+
+    assert {:ok, nil} =
+             MySimpleGrammar.parse("""
+               hello
+                      world
+             """)
+  end
 end

@@ -7,14 +7,32 @@ defmodule Grammar do
   The grammar is defined by a set of rules, each rule being a set of clauses. Clauses must be understood as
   disjoinded paths in the rule resolution, or as the `or` operator in the classic notation.
 
-  The tokenization process relies on the TokenExtractor protocol, which is used to extract tokens from the input string.
+  The tokenization process relies on the [TokenExtractor](`Grammar.TokenExtractor`) protocol, which is used to extract tokens from the input string.
   This protocol is implemented for BitString and Regex, and can be extended to custom token types.
 
-  To declare a parser module, just `use` the Grammar module in your module, and define your rules using the `rule` and `rule?` macro.
+  To declare a parser module, just `use` the Grammar module in your module, and define your rules using the `rule/2` and `rule?/2` macro.
   The newly defined module will expose a `parse/1` function that will parse the input string, and return a tuple with the
   tokenizer in its final state, and result.
 
   See `rule/2` for a full example.
+
+  ## Spaces and line breaks handling
+
+  By default, the tokenizer will drop spaces and line breaks.
+  If you want to keep them, you can pass the `drop_spaces: false` option to the `use Grammar` macro. In this case, you
+  are fully responsible for handling spaces and line breaks in your rules.
+
+  ## Options
+
+  - `drop_spaces: true` (default): if set to `false`, the tokenizer will not drop spaces and line breaks.
+
+  #### Example
+
+      defmodule MyModule do
+        use Grammar, drop_spaces: false
+
+        # You're now responsible for handling spaces and line breaks in your rules
+      end
   """
 
   defmodule TokenExtractorHelper do
@@ -365,7 +383,18 @@ defmodule Grammar do
   end
 
   # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
-  defp build_tokenizer(token_templates_ast) do
+  defp build_tokenizer(token_templates_ast, drop_spaces?) do
+    drop_spaces_or_not =
+      if drop_spaces? do
+        quote do
+          tokenizer = tokenizer |> drop_spaces()
+        end
+      else
+        quote do
+          tokenizer
+        end
+      end
+
     quote do
       defmodule Tokenizer do
         @moduledoc """
@@ -381,8 +410,8 @@ defmodule Grammar do
         @extractors [unquote_splicing(token_templates_ast)]
 
         def new(input) when is_binary(input) do
-          struct(__MODULE__, input: input)
-          |> drop_spaces()
+          tokenizer = struct(__MODULE__, input: input)
+          unquote(drop_spaces_or_not)
         end
 
         def current_token(%__MODULE__{input: input} = tokenizer) do
@@ -399,7 +428,8 @@ defmodule Grammar do
               tokenizer =
                 tokenizer
                 |> consume_token(token_length)
-                |> drop_spaces()
+
+              unquote(drop_spaces_or_not)
 
               {token, tokenizer}
           end
@@ -540,11 +570,17 @@ defmodule Grammar do
 
   defmacro rule?({name, meta, def}, do: blk) when is_atom(name), do: store_clause(__CALLER__.module, name, meta, def, blk, true)
 
-  defmacro __using__(_opts) do
+  @allowed_opts [drop_spaces: true]
+
+  defmacro __using__(opts) do
+    opts = Keyword.validate!(opts, @allowed_opts)
+    drop_spaces? = Keyword.get(opts, :drop_spaces, true)
+
     quote do
       @compile {:inline, []}
 
-      Module.put_attribute(unquote(__CALLER__.module), :rules, %{})
+      @drop_spaces? unquote(drop_spaces?)
+      @rules %{}
 
       @before_compile unquote(__MODULE__)
 
@@ -554,6 +590,7 @@ defmodule Grammar do
 
   defmacro __before_compile__(_env) do
     all_rules = Module.get_attribute(__CALLER__.module, :rules)
+    drop_spaces? = Module.get_attribute(__CALLER__.module, :drop_spaces?)
 
     # Check for missing rule declarations
     #
@@ -591,7 +628,7 @@ defmodule Grammar do
 
     # Generate the tokenizer module from the token templates
     #
-    tokenizer = build_tokenizer(token_templates)
+    tokenizer = build_tokenizer(token_templates, drop_spaces?)
 
     # Generate parser functions
     #
@@ -609,7 +646,8 @@ defmodule Grammar do
         unquote(Macro.escape(rules_with_firsts))
       end
 
-      @spec parse(binary()) :: {:ok, term()} | {:error, {integer(), integer()}, atom()} | {:error, {integer(), integer()}, atom(), term()}
+      @spec parse(binary()) ::
+              {:ok, term()} | {:error, {integer(), integer()}, atom()} | {:error, {integer(), integer()}, atom(), term()}
       def parse(input) do
         try do
           tokenizer = __MODULE__.Tokenizer.new(input)
