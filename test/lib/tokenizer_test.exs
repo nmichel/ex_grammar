@@ -51,7 +51,7 @@ defmodule TokenizerTest do
   end
 
   test "test tokenizer" do
-    alias MyGrammar.Tokenizer
+    alias Grammar.Tokenizer
 
     alias SpecialTokens.{
       QuotedString,

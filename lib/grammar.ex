@@ -381,101 +381,6 @@ defmodule Grammar do
     end
   end
 
-  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
-  defp build_tokenizer(drop_spaces?) do
-    drop_spaces_or_not =
-      if drop_spaces? do
-        quote do
-          tokenizer = tokenizer |> drop_spaces()
-        end
-      else
-        quote do
-          tokenizer
-        end
-      end
-
-    quote do
-      defmodule Tokenizer do
-        @moduledoc """
-        This module implements the tokenizer for your very specific grammar. It is derived
-        from the list of tokens that are used in the grammar rules.
-        """
-
-        @enforce_keys [:input]
-        defstruct input: "", current_line: 1, current_column: 1
-
-        @newlines ~c[\n]
-        @whitespaces ~c[ \t\v\f\r]
-
-        def new(input) when is_binary(input) do
-          tokenizer = struct(__MODULE__, input: input)
-          unquote(drop_spaces_or_not)
-        end
-
-        def current_token(%__MODULE__{input: input} = tokenizer, token_prototypes) do
-          {token, _} = try_read_token(tokenizer, token_prototypes)
-          {token, tokenizer}
-        end
-
-        def next_token(%__MODULE__{input: input} = tokenizer, token_prototype) do
-          case try_read_token(tokenizer, [token_prototype]) do
-            {token, 0} ->
-              {token, tokenizer}
-
-            {token, token_length} ->
-              tokenizer = consume_token(tokenizer, token_length)
-              unquote(drop_spaces_or_not)
-              {token, tokenizer}
-          end
-        end
-
-        def try_read_token(%__MODULE__{} = tokenizer, token_prototypes) do
-          input = tokenizer.input
-          cursor = {tokenizer.current_line, tokenizer.current_column}
-
-          token_prototypes
-          |> Enum.reduce({nil, 0}, fn token_template, {current_token, current_length} ->
-            case TokenExtractor.try_read(token_template, input) do
-              nil -> {current_token, current_length}
-              {token, length} when length > current_length -> {token, length}
-              _found_tuple -> {current_token, current_length}
-            end
-          end)
-          |> then(fn {token, length} -> {{token, cursor}, length} end)
-        end
-
-        def consume_token(%__MODULE__{} = tokenizer, token_length) do
-          input = tokenizer.input
-          {token_string, rest} = String.split_at(input, token_length)
-          tokenizer = update_cursor(tokenizer, token_string)
-          %{tokenizer | input: rest}
-        end
-
-        def update_cursor(%__MODULE__{} = tokenizer, <<"">>), do: tokenizer
-
-        def update_cursor(%__MODULE__{} = tokenizer, <<c::utf8, tail::binary>>) when c in @newlines do
-          update_cursor(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 0}, tail)
-        end
-
-        def update_cursor(%__MODULE__{} = tokenizer, <<c::utf8, tail::binary>>) do
-          update_cursor(%{tokenizer | current_line: tokenizer.current_line, current_column: tokenizer.current_column + 1}, tail)
-        end
-
-        def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @newlines do
-          drop_spaces(%{tokenizer | current_line: tokenizer.current_line + 1, current_column: 1, input: tail})
-        end
-
-        def drop_spaces(%__MODULE__{input: <<c::utf8, tail::binary>>} = tokenizer) when c in @whitespaces do
-          drop_spaces(%{tokenizer | input: tail, current_column: tokenizer.current_column + 1})
-        end
-
-        def drop_spaces(%__MODULE__{} = tokenizer) do
-          tokenizer
-        end
-      end
-    end
-  end
-
   @doc """
   Use this macro to define rules of your grammar.
 
@@ -529,7 +434,7 @@ defmodule Grammar do
       end
 
       NumberOfNameListParser.parse("[1, toto, 23]")
-      {%NumberOfNameListParser.Tokenizer{
+      {%Grammar.Tokenizer{
         input: "",
         current_line: 1,
         current_column: 14
@@ -599,10 +504,6 @@ defmodule Grammar do
         raise "\n* Ambiguous rules\n#{errors}"
     end
 
-    # Generate the tokenizer module from the token templates
-    #
-    tokenizer = build_tokenizer(drop_spaces?)
-
     # Generate parser functions
     #
     productions = build_production_for_rules(rules_with_firsts)
@@ -613,7 +514,7 @@ defmodule Grammar do
     # Generate parse/1 function
     #
     quote do
-      unquote(tokenizer)
+      alias Grammar.Tokenizer
 
       def rules do
         unquote(Macro.escape(rules_with_firsts))
@@ -623,7 +524,7 @@ defmodule Grammar do
               {:ok, term()} | {:error, {integer(), integer()}, atom()} | {:error, {integer(), integer()}, atom(), term()}
       def parse(input) do
         try do
-          tokenizer = __MODULE__.Tokenizer.new(input)
+          tokenizer = Tokenizer.new(input, unquote(drop_spaces?))
           {tokenizer_final, value} = unquote(start.name)(tokenizer)
           {:ok, value}
         catch
