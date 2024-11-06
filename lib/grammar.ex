@@ -7,7 +7,7 @@ defmodule Grammar do
   The grammar is defined by a set of rules, each rule being a set of clauses. Clauses must be understood as
   disjoinded paths in the rule resolution, or as the `or` operator in the classic notation.
 
-  The tokenization process relies on the [TokenExtractor](`Grammar.TokenExtractor`) protocol, which is used to extract tokens from the input string.
+  The tokenization process relies on the [TokenExtractor](`Grammar.Tokenizer.TokenExtractor`) protocol, which is used to extract tokens from the input string.
   This protocol is implemented for BitString and Regex, and can be extended to custom token types.
 
   To declare a parser module, just `use` the Grammar module in your module, and define your rules using the `rule/2` and `rule?/2` macro.
@@ -34,108 +34,6 @@ defmodule Grammar do
         # You're now responsible for handling spaces and line breaks in your rules
       end
   """
-
-  defmodule TokenExtractorHelper do
-    @moduledoc """
-    This module provides helper functions to work with TokenExtractor implementations using Regex.
-    """
-    @spec normalize_regex(Regex.t()) :: Regex.t()
-    def normalize_regex(regex) do
-      source = Regex.source(regex)
-      opt = Regex.opts(regex)
-
-      case source do
-        "^" <> _rest -> regex
-        source -> Regex.compile!("^#{source}", opt)
-      end
-    end
-
-    @spec try_read_from_regex(Regex.t(), String.t()) :: nil | {String.t(), integer()}
-    def try_read_from_regex(pattern, input_string) do
-      case Regex.run(pattern, input_string) do
-        nil -> nil
-        [match] -> {match, byte_size(match)}
-      end
-    end
-  end
-
-  defprotocol TokenExtractor do
-    @moduledoc """
-    This protocol exposes the functions needed to extract tokens from the input string.
-    """
-
-    @doc """
-    Try to read a token from the input string.
-
-    If the token is found, returns the token and its length in the input string.
-    Returns nil otherwise.
-
-    ## Example
-
-        iex> Grammar.TokenExtractor.try_read("hello", "hello world")
-        {"hello", 5}
-
-        iex> Grammar.TokenExtractor.try_read("Hello", "hello world")
-        nil
-
-        iex> Grammar.TokenExtractor.try_read(~r/[0-9]+/, "013456toto")
-        {"013456", 6}
-
-        iex> Grammar.TokenExtractor.try_read(~r/[a-z]+/, "013456toto")
-        nil
-    """
-    @spec try_read(t, String.t()) :: nil | {String.t(), integer()}
-    def try_read(token_prototype, input_string)
-
-    @doc """
-    Returns true if the token matches the token prototype.
-
-    This function is used orient the parser in the right clause of a rule, by comparing the current token
-    to the clause list of first tokens.
-
-    ## Example
-
-        iex> Grammar.TokenExtractor.match?("hello", "hello")
-        true
-
-        iex> Grammar.TokenExtractor.match?("hello", "Horld")
-        false
-
-        iex> Grammar.TokenExtractor.match?(~r/[0-9]+/, "013456")
-        true
-
-        iex> Grammar.TokenExtractor.match?(~r/[0-9]+/, "a013456")
-        false
-    """
-    @spec match?(t, term()) :: boolean()
-    def match?(prototype, token)
-  end
-
-  defimpl TokenExtractor, for: BitString do
-    def try_read(token_prototype, input_string) do
-      case input_string do
-        <<^token_prototype::binary, _rest::binary>> -> {token_prototype, String.length(token_prototype)}
-        _ -> nil
-      end
-    end
-
-    def match?(token, token) when is_binary(token), do: true
-    def match?(_token, _string), do: false
-  end
-
-  defimpl TokenExtractor, for: Regex do
-    def try_read(token_prototype, input_string) do
-      token_prototype
-      |> TokenExtractorHelper.normalize_regex()
-      |> TokenExtractorHelper.try_read_from_regex(input_string)
-    end
-
-    def match?(regex, token) when is_binary(token) do
-      [token] == Regex.run(regex, token)
-    end
-
-    def match?(_regex, _token), do: false
-  end
 
   defmodule Clause do
     @moduledoc """
@@ -284,7 +182,7 @@ defmodule Grammar do
 
   def build_production_for_clause(%Clause{firsts: firsts, blk: blk} = clause, nested_ast) do
     quote do
-      if Enum.any?(unquote(firsts), &Grammar.TokenExtractor.match?(&1, current_token)) do
+      if Enum.any?(unquote(firsts), &Grammar.Tokenizer.TokenExtractor.match?(&1, current_token)) do
         fun_in = []
 
         unquote_splicing(build_production_code_for_clause(clause))

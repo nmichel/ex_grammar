@@ -5,6 +5,8 @@ defmodule Grammar.Tokenizer do
   It is driven by the parser to search for specific tokens only, when required.
   """
 
+  alias Grammar.Tokenizer.TokenExtractor
+
   @enforce_keys [:input, :drop_spaces?]
   defstruct input: "", current_line: 1, current_column: 1, drop_spaces?: true
 
@@ -42,7 +44,7 @@ defmodule Grammar.Tokenizer do
 
     token_prototypes
     |> Enum.reduce({nil, 0}, fn token_template, {current_token, current_length} ->
-      case Grammar.TokenExtractor.try_read(token_template, input) do
+      case TokenExtractor.try_read(token_template, input) do
         nil -> {current_token, current_length}
         {token, length} when length > current_length -> {token, length}
         _found_tuple -> {current_token, current_length}

@@ -7,11 +7,13 @@ defmodule SpecialTokens do
     defstruct ip: nil
   end
 
-  defimpl Grammar.TokenExtractor, for: IP do
+  defimpl Grammar.Tokenizer.TokenExtractor, for: IP do
     @pattern ~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/
 
+    alias Grammar.Tokenizer.TokenExtractorHelper
+
     def try_read(_token_prototype, input_string) do
-      Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+      TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
       |> case do
         nil ->
           nil
@@ -41,11 +43,13 @@ defmodule SpecialTokens do
     defstruct number: nil
   end
 
-  defimpl Grammar.TokenExtractor, for: Number do
+  defimpl Grammar.Tokenizer.TokenExtractor, for: Number do
     @pattern ~r/^[0-9]+/
 
+    alias Grammar.Tokenizer.TokenExtractorHelper
+
     def try_read(_token_prototype, input_string) do
-      Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+      TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
       |> case do
         nil ->
           nil
@@ -75,11 +79,13 @@ defmodule SpecialTokens do
     defstruct string: nil
   end
 
-  defimpl Grammar.TokenExtractor, for: QuotedString do
+  defimpl Grammar.Tokenizer.TokenExtractor, for: QuotedString do
     @pattern ~r/^"[^"]*"/
 
+    alias Grammar.Tokenizer.TokenExtractorHelper
+
     def try_read(_token_prototype, input_string) do
-      Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+      TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
       |> case do
         nil ->
           nil
@@ -105,11 +111,13 @@ defmodule SpecialTokens do
     defstruct string: nil
   end
 
-  defimpl Grammar.TokenExtractor, for: Identifier do
+  defimpl Grammar.Tokenizer.TokenExtractor, for: Identifier do
     @pattern ~r/^[a-zA-Z]+[a-zA-Z0-9_]*/
 
+    alias Grammar.Tokenizer.TokenExtractorHelper
+
     def try_read(_token_prototype, input_string) do
-      Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+      TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
       |> case do
         nil ->
           nil

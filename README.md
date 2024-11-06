@@ -121,11 +121,11 @@ defmodule IP do
   defstruct ip: nil
 end
 
-defimpl Grammar.TokenExtractor, for: IP do
+defimpl Grammar.Tokenizer.TokenExtractor, for: IP do
   @pattern ~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/
 
   def try_read(_token_prototype, input_string) do
-    Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
+    Grammar.Tokenizer.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)
     |> case do
       nil ->
         nil

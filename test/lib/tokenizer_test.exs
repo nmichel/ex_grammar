@@ -1,10 +1,12 @@
 defmodule TokenizerTest do
-  alias SpecialTokens.QuotedString
-  alias Code.Identifier
-  alias SpecialTokens.Number
   use ExUnit.Case
 
-  doctest Grammar.TokenExtractor
+  doctest Grammar.Tokenizer.TokenExtractor
+
+  alias Grammar.Tokenizer
+  alias SpecialTokens.Identifier
+  alias SpecialTokens.Number
+  alias SpecialTokens.QuotedString
 
   defmodule MyGrammar do
     use Grammar
@@ -51,14 +53,6 @@ defmodule TokenizerTest do
   end
 
   test "test tokenizer" do
-    alias Grammar.Tokenizer
-
-    alias SpecialTokens.{
-      QuotedString,
-      Number,
-      Identifier
-    }
-
     tokenizer = Tokenizer.new(~S/  coucou
       1234
         "blablabla coucou 1234
