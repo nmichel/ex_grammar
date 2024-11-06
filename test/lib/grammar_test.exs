@@ -11,7 +11,7 @@ defmodule GrammarTest do
 
     assert {:ok, "world"} = MySimpleGrammarStrict.parse("hello")
 
-    assert {:error, {1, 6}, :no_token} = MySimpleGrammarStrict.parse("     ")
+    assert {:error, {1, 6}, :no_clause_matched} = MySimpleGrammarStrict.parse("     ")
   end
 
   test "simplest relaxed" do
@@ -50,7 +50,7 @@ defmodule GrammarTest do
       rule start("hello", "world"), do: "hello world"
     end
 
-    assert {:error, {1, 1}, :no_token} =
+    assert {:error, {1, 1}, :no_clause_matched} =
              MySimpleGrammar.parse("""
                hello
                       world

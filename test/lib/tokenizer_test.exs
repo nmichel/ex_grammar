@@ -1,4 +1,7 @@
 defmodule TokenizerTest do
+  alias SpecialTokens.QuotedString
+  alias Code.Identifier
+  alias SpecialTokens.Number
   use ExUnit.Case
 
   doctest Grammar.TokenExtractor
@@ -48,21 +51,37 @@ defmodule TokenizerTest do
   end
 
   test "test tokenizer" do
-    tokenizer = MyGrammar.Tokenizer.new(~S/  coucou
+    alias MyGrammar.Tokenizer
+
+    alias SpecialTokens.{
+      QuotedString,
+      Number,
+      Identifier
+    }
+
+    tokenizer = Tokenizer.new(~S/  coucou
       1234
-        "blablabla coucou 12234"
-    """
+        "blablabla coucou 1234
         bla  bla
-       """
+       "
        re 12
     /)
 
-    assert [
-             {"12", {7, 11}},
-             {"re", {7, 8}},
-             {"\"blablabla coucou 12234\"\n    \"\"\"\n        bla  bla\n       \"\"\"", {3, 9}},
-             {"1234", {2, 7}},
-             {"coucou", {1, 3}}
-           ] = Enum.reduce(tokenizer, [], fn e, a -> [e | a] end)
+    token_prototypes = [%Number{}, "coucou", %Identifier{}, %QuotedString{}]
+
+    token_and_metas = [
+      {{"coucou", {1, 3}}, "coucou"},
+      {{%Number{number: 1234}, {2, 7}}, %Number{}},
+      {{%QuotedString{string: "\"blablabla coucou 1234\n        bla  bla\n       \""}, {3, 9}}, %QuotedString{}},
+      {{%Identifier{string: "re"}, {6, 8}}, %Identifier{}},
+      {{%Number{number: 12}, {6, 11}}, %Number{}}
+    ]
+
+    Enum.reduce(token_and_metas, tokenizer, fn {token_and_meta_expected, token_prototype}, tokenizer ->
+      {token_and_meta_found, tokenizer} = Tokenizer.current_token(tokenizer, token_prototypes)
+      ^token_and_meta_expected = token_and_meta_found
+      {^token_and_meta_expected, tokenizer} = Tokenizer.next_token(tokenizer, token_prototype)
+      tokenizer
+    end)
   end
 end

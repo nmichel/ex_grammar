@@ -65,7 +65,7 @@ defmodule GrammarMathExpressionTest do
   end
 
   test "catch incomplete expression" do
-    assert {:error, {1, 4}, :no_token} = MathExpressionGrammar.parse("1 +")
+    assert {:error, {1, 4}, :no_clause_matched} = MathExpressionGrammar.parse("1 +")
   end
 
   test "catch invalid expression with valid token" do
@@ -73,6 +73,6 @@ defmodule GrammarMathExpressionTest do
   end
 
   test "catch invalid expression with invalid token" do
-    assert {:error, {1, 5}, :no_token} = MathExpressionGrammar.parse("1 + toto")
+    assert {:error, {1, 5}, :no_clause_matched} = MathExpressionGrammar.parse("1 + toto")
   end
 end

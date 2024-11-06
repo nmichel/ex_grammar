@@ -76,7 +76,7 @@ defmodule SpecialTokens do
   end
 
   defimpl Grammar.TokenExtractor, for: QuotedString do
-    @pattern ~r/^"[\S\s]*"/
+    @pattern ~r/^"[^"]*"/
 
     def try_read(_token_prototype, input_string) do
       Grammar.TokenExtractorHelper.try_read_from_regex(@pattern, input_string)

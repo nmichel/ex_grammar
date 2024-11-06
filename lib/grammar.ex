@@ -263,44 +263,41 @@ defmodule Grammar do
     Enum.map(rules, &build_production_for_rule(&1))
   end
 
-  def build_production_for_rule({name, %Rule{name: name, clauses: clauses}}) do
+  def build_production_for_rule({name, %Rule{name: name, clauses: clauses} = rule}) do
     epsilon? = Enum.any?(clauses, &Clause.epsilon?/1)
     no_clause = (epsilon? && epsilon_clause()) || no_clause()
-    nested_clauses = Enum.reduce(clauses, no_clause, &build_production_for_clause(&1, &2))
+    nested_clauses = Enum.reduce(clauses, what_are_you_doing_here_clause(), &build_production_for_clause(&1, &2))
+    firsts = Rule.get_firsts(rule)
 
     quote do
       def unquote(name)(%Tokenizer{} = tokenizer) do
-        unquote(nested_clauses)
+        case Tokenizer.current_token(tokenizer, unquote(firsts)) do
+          {{nil, cursor}, tokenizer} ->
+            unquote(no_clause)
+
+          {{current_token, cursor}, tokenizer} ->
+            unquote(nested_clauses)
+        end
       end
     end
   end
 
-  def build_production_for_clause(%Clause{firsts: firsts, blk: blk, epsilon: epsilon} = clause, nested_ast) do
+  def build_production_for_clause(%Clause{firsts: firsts, blk: blk} = clause, nested_ast) do
     quote do
-      case Tokenizer.current_token(tokenizer) do
-        {{nil, cursor}, tokenizer} ->
-          if unquote(epsilon) do
-            {tokenizer, nil}
-          else
-            throw({cursor, :no_token})
-          end
+      if Enum.any?(unquote(firsts), &Grammar.TokenExtractor.match?(&1, current_token)) do
+        fun_in = []
 
-        {{token, cursor}, tokenizer} ->
-          if Enum.any?(unquote(firsts), &Grammar.TokenExtractor.match?(&1, token)) do
-            fun_in = []
+        unquote_splicing(build_production_code_for_clause(clause))
 
-            unquote_splicing(build_production_code_for_clause(clause))
+        fun_out =
+          (fn var!(params) ->
+             _ = var!(params)
+             unquote(blk)
+           end).(fun_in)
 
-            fun_out =
-              (fn var!(params) ->
-                 _ = var!(params)
-                 unquote(blk)
-               end).(fun_in)
-
-            {tokenizer, fun_out}
-          else
-            unquote(nested_ast)
-          end
+        {tokenizer, fun_out}
+      else
+        unquote(nested_ast)
       end
     end
   end
@@ -324,16 +321,12 @@ defmodule Grammar do
 
   def build_production_code_for_clause_elem(matcher) do
     quote do
-      case Tokenizer.next_token(tokenizer) do
+      case Tokenizer.next_token(tokenizer, unquote(matcher)) do
         {{nil, cursor}, tokenizer} ->
           throw({cursor, :no_token})
 
         {{token, cursor}, tokenizer} ->
-          if TokenExtractor.match?(unquote(matcher), token) do
-            {tokenizer, token}
-          else
-            throw({cursor, :unexpected_token, token})
-          end
+          {tokenizer, token}
       end
     end
   end
@@ -347,6 +340,12 @@ defmodule Grammar do
   def epsilon_clause do
     quote do
       {tokenizer, nil}
+    end
+  end
+
+  def what_are_you_doing_here_clause do
+    quote do
+      throw({cursor, :what_are_you_doing_here})
     end
   end
 
@@ -383,7 +382,7 @@ defmodule Grammar do
   end
 
   # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
-  defp build_tokenizer(token_templates_ast, drop_spaces?) do
+  defp build_tokenizer(drop_spaces?) do
     drop_spaces_or_not =
       if drop_spaces? do
         quote do
@@ -407,39 +406,34 @@ defmodule Grammar do
 
         @newlines ~c[\n]
         @whitespaces ~c[ \t\v\f\r]
-        @extractors [unquote_splicing(token_templates_ast)]
 
         def new(input) when is_binary(input) do
           tokenizer = struct(__MODULE__, input: input)
           unquote(drop_spaces_or_not)
         end
 
-        def current_token(%__MODULE__{input: input} = tokenizer) do
-          {token, _} = try_read_token(tokenizer)
+        def current_token(%__MODULE__{input: input} = tokenizer, token_prototypes) do
+          {token, _} = try_read_token(tokenizer, token_prototypes)
           {token, tokenizer}
         end
 
-        def next_token(%__MODULE__{input: input} = tokenizer) do
-          case try_read_token(tokenizer) do
+        def next_token(%__MODULE__{input: input} = tokenizer, token_prototype) do
+          case try_read_token(tokenizer, [token_prototype]) do
             {token, 0} ->
               {token, tokenizer}
 
             {token, token_length} ->
-              tokenizer =
-                tokenizer
-                |> consume_token(token_length)
-
+              tokenizer = consume_token(tokenizer, token_length)
               unquote(drop_spaces_or_not)
-
               {token, tokenizer}
           end
         end
 
-        def try_read_token(%__MODULE__{} = tokenizer) do
+        def try_read_token(%__MODULE__{} = tokenizer, token_prototypes) do
           input = tokenizer.input
           cursor = {tokenizer.current_line, tokenizer.current_column}
 
-          @extractors
+          token_prototypes
           |> Enum.reduce({nil, 0}, fn token_template, {current_token, current_length} ->
             case TokenExtractor.try_read(token_template, input) do
               nil -> {current_token, current_length}
@@ -477,23 +471,6 @@ defmodule Grammar do
 
         def drop_spaces(%__MODULE__{} = tokenizer) do
           tokenizer
-        end
-      end
-
-      defimpl Enumerable, for: __MODULE__.Tokenizer do
-        def count(_tokenizer), do: {:error, Tokenizer}
-        def member?(_tokenizer, _element), do: {:error, Tokenizer}
-        def slice(_tokenizer), do: {:error, Tokenizer}
-        def reduce(tokenizer, {:halt, acc}, _fun), do: {:halted, acc}
-
-        def reduce(tokenizer, {:cont, acc}, fun) do
-          case Tokenizer.next_token(tokenizer) do
-            {{nil, cursor}, _} ->
-              {:done, acc}
-
-            {token, tokenizer} ->
-              reduce(tokenizer, fun.(token, acc), fun)
-          end
         end
       end
     end
@@ -622,13 +599,9 @@ defmodule Grammar do
         raise "\n* Ambiguous rules\n#{errors}"
     end
 
-    # Generate the list of possible tokens from the clause firsts lists
-    #
-    token_templates = build_token_list(rules_with_firsts)
-
     # Generate the tokenizer module from the token templates
     #
-    tokenizer = build_tokenizer(token_templates, drop_spaces?)
+    tokenizer = build_tokenizer(drop_spaces?)
 
     # Generate parser functions
     #

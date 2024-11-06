@@ -104,9 +104,4 @@ defmodule GrammarProgramTest do
       string
     end
   end
-
-  test "math expression" do
-    tokenizer = MyGrammar.Tokenizer.new("coucou")
-    assert [{"coucou", {1, 1}}] = Enum.reduce(tokenizer, [], fn e, a -> [e | a] end)
-  end
 end
