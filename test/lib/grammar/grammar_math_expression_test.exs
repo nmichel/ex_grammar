@@ -1,4 +1,4 @@
-defmodule GrammarMathExpressionTest do
+defmodule Grammar.MathExpressionTest do
   use ExUnit.Case
 
   defmodule MathExpressionGrammar do

@@ -1,4 +1,4 @@
-defmodule GrammarProgramTest do
+defmodule Grammar.ProgramTest do
   use ExUnit.Case
 
   defmodule MyGrammar do

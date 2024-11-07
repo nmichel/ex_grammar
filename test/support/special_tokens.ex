@@ -1,4 +1,4 @@
-defmodule SpecialTokens do
+defmodule Grammar.SpecialTokens do
   @moduledoc """
   This module defines special tokens that are not included in the standard library, primarily for testing purposes.
   """

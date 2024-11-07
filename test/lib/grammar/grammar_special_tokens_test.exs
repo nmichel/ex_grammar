@@ -1,13 +1,13 @@
-defmodule GrammarSpecialTokensTest do
+defmodule Grammar.SpecialTokensTest do
   use ExUnit.Case
 
   defmodule MyGrammar do
     use Grammar
 
-    alias SpecialTokens.Identifier
-    alias SpecialTokens.IP
-    alias SpecialTokens.Number
-    alias SpecialTokens.QuotedString
+    alias Grammar.SpecialTokens.Identifier
+    alias Grammar.SpecialTokens.IP
+    alias Grammar.SpecialTokens.Number
+    alias Grammar.SpecialTokens.QuotedString
 
     rule program(:assignment) do
       [assignment] = params
@@ -56,11 +56,11 @@ defmodule GrammarSpecialTokensTest do
   end
 
   test "grammar with special tokens" do
-    assert {:ok, "assigne le nombre 12 à un_nombre"} = GrammarSpecialTokensTest.MyGrammar.parse("un_nombre = 12")
+    assert {:ok, "assigne le nombre 12 à un_nombre"} = MyGrammar.parse("un_nombre = 12")
 
     assert {:ok, "assigne la chaîne \"ceci est une chaîne\" à une_chaine"} =
-             GrammarSpecialTokensTest.MyGrammar.parse("une_chaine = \"ceci est une chaîne\"")
+             MyGrammar.parse("une_chaine = \"ceci est une chaîne\"")
 
-    assert {:ok, "assigne l'adresse IP 12.12.3.4 à une_ip"} = GrammarSpecialTokensTest.MyGrammar.parse("une_ip = 12.12.3.4")
+    assert {:ok, "assigne l'adresse IP 12.12.3.4 à une_ip"} = MyGrammar.parse("une_ip = 12.12.3.4")
   end
 end

@@ -1,56 +1,12 @@
-defmodule TokenizerTest do
+defmodule Grammar.TokenizerTest do
   use ExUnit.Case
 
   doctest Grammar.Tokenizer.TokenExtractor
 
+  alias Grammar.SpecialTokens.Identifier
+  alias Grammar.SpecialTokens.Number
+  alias Grammar.SpecialTokens.QuotedString
   alias Grammar.Tokenizer
-  alias SpecialTokens.Identifier
-  alias SpecialTokens.Number
-  alias SpecialTokens.QuotedString
-
-  defmodule MyGrammar do
-    use Grammar
-
-    rule start(:number) do
-      [number] = params
-      number
-    end
-
-    rule start(:identifier) do
-      [identifier] = params
-      identifier
-    end
-
-    rule start(:string) do
-      [string] = params
-      string
-    end
-
-    rule start(:multi_line_comment) do
-      [comment] = params
-      comment
-    end
-
-    rule number(~r/[0-9]+/) do
-      [number] = params
-      number
-    end
-
-    rule identifier(~r/[a-zA-Z]+[a-zA-Z0-9]*/) do
-      [string] = params
-      string
-    end
-
-    rule string(~r/"[\S\s]*"/) do
-      [string] = params
-      string
-    end
-
-    rule multi_line_comment(~r/""".*?"""/s) do
-      [string] = params
-      string
-    end
-  end
 
   test "test tokenizer" do
     tokenizer = Tokenizer.new(~S/  coucou
@@ -77,5 +33,14 @@ defmodule TokenizerTest do
       {^token_and_meta_expected, tokenizer} = Tokenizer.next_token(tokenizer, token_prototype)
       tokenizer
     end)
+  end
+
+  test "spaces and linebreaks cuts Bitstring tokens" do
+    tokenizer = Tokenizer.new("cou
+    cou
+    ")
+
+    assert {{nil, {1, 1}}, _} = Tokenizer.next_token(tokenizer, "coucou")
+    assert {{"cou", {1, 1}}, _} = Tokenizer.next_token(tokenizer, "cou")
   end
 end
