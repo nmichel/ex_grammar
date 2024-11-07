@@ -4,12 +4,15 @@ defmodule Project do
   def project do
     [
       app: :grammar,
-      version: "0.0.1",
+      version: "0.1.0",
       elixirc_options: [warnings_as_errors: true],
       elixirc_paths: elixirc_paths(Mix.env()),
-      consolidate_protocols: Mix.env() not in [:dev, :test],
+      consolidate_protocols: Mix.env() != :test,
       deps: deps(),
-      aliases: aliases()
+      aliases: aliases(),
+      name: "Grammar",
+      source_url: "https://github.com/nmichel/ex_grammar",
+      docs: docs()
     ]
   end
 
@@ -30,6 +33,16 @@ defmodule Project do
         "format --check-formatted",
         "credo --strict",
         "dialyzer"
+      ]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "Grammar",
+      extras: ["README.md", "LICENSE.md"],
+      groups_for_modules: [
+        Internal: ~r/^Grammar.CodeGen/
       ]
     ]
   end
