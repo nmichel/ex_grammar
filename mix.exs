@@ -12,7 +12,9 @@ defmodule Project do
       aliases: aliases(),
       name: "Grammar",
       source_url: "https://github.com/nmichel/ex_grammar",
-      docs: docs()
+      docs: docs(),
+      description: description(),
+      package: package()
     ]
   end
 
@@ -43,7 +45,22 @@ defmodule Project do
       extras: ["README.md", "LICENSE.md"],
       groups_for_modules: [
         Internal: [~r/^Grammar.CodeGen/, Grammar.Tokenizer]
-      ]
+      ],
+      source_ref: "master"
+    ]
+  end
+
+  defp description do
+    """
+    A simple DSL to define parsers / transformers for LL(1) structured inputs.
+    """
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      maintainers: ["Nicolas Michel"],
+      links: %{"GitHub" => "https://github.com/nmichel/ex_grammar"}
     ]
   end
 end
