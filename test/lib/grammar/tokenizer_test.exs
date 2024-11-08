@@ -1,6 +1,7 @@
 defmodule Grammar.TokenizerTest do
   use ExUnit.Case
 
+  doctest Grammar.Tokenizer
   doctest Grammar.Tokenizer.TokenExtractor
 
   alias Grammar.SpecialTokens.Identifier

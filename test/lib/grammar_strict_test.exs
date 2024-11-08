@@ -1,6 +1,5 @@
 defmodule GrammarStrictTest do
   use ExUnit.Case
-  doctest Grammar
 
   describe "with drop_spaces mode on" do
     defmodule HelloWorldStrict do

@@ -1,6 +1,5 @@
-defmodule GrammarTest do
+defmodule GrammarRelaxedTest do
   use ExUnit.Case
-  doctest Grammar
 
   describe "with drop_spaces mode on" do
     defmodule HelloWorldRelaxed do

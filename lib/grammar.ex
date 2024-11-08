@@ -28,11 +28,42 @@ defmodule Grammar do
 
   #### Example
 
-      defmodule MyModule do
-        use Grammar, drop_spaces: false
+  In the following `MyModuleKO` module, the `start` rule doesn't handle spaces and line breaks,
+  so it will fail if the input contains them.
 
-        # You're now responsible for handling spaces and line breaks in your rules
-      end
+      iex> defmodule MyModuleKO do
+      ...>   use Grammar, drop_spaces: false
+      ...>
+      ...>   # spaces and linebreaks not handled
+      ...>
+      ...>   rule start("hello", "world") do
+      ...>     [_hello, _world] = params
+      ...>     "hello world"
+      ...>   end
+      ...> end
+      iex> MyModuleKO.parse("helloworld")
+      {:ok, "hello world"}
+      iex> MyModuleKO.parse("hello world")
+      {:error, {1, 6}, :no_token}
+
+  But in the `MyModuleOK` module, the `start` explicitly handles spaces and line breaks between "hello" and "world".
+
+  And even more that rule definition requires at least one space between "hello" and "world", parsing fails if no space is found.
+
+      iex> defmodule MyModuleOK do
+      ...>   use Grammar, drop_spaces: false
+      ...>
+      ...>   # spaces and linebreaks not handled
+      ...>
+      ...>   rule start("hello", ~r/[\\s]+/, "world") do
+      ...>     [_hello, _spaces, _world] = params
+      ...>     "hello world"
+      ...>   end
+      ...> end
+      iex> MyModuleOK.parse("helloworld")
+      {:error, {1, 6}, :no_token}
+      iex> MyModuleOK.parse(~s/hello  \\t world/)
+      {:ok, "hello world"}
   """
 
   alias Grammar.CodeGen
@@ -60,41 +91,36 @@ defmodule Grammar do
 
   ## Example
 
-      defmodule NumberOfNameListParser do
-        use Grammar
-
-        rule start("[", :list_or_empty_list) do
-          [_, list] = params
-          list || []
-        end
-
-        rule? list_or_empty_list(:item, :list_tail, "]") do
-          [item, list_tail, _] = params
-          [item | (list_tail || [])]
-        end
-
-        rule? list_tail(",", :item, :list_tail) do
-          [_, item, list_tail] = params
-          [item | (list_tail || [])]
-        end
-
-        rule item(~r/[0-9]+/) do
-          [number] = params
-          String.to_integer(number)
-        end
-
-        rule item(~r/[a-zA-Z]+/) do
-          [string] = params
-          string
-        end
-      end
-
-      NumberOfNameListParser.parse("[1, toto, 23]")
-      {%Grammar.Tokenizer{
-        input: "",
-        current_line: 1,
-        current_column: 14
-      }, [1, "toto", 23]}
+      iex> defmodule NumberOfNameListParser do
+      ...>   use Grammar
+      ...>
+      ...>   rule start("[", :list_or_empty_list) do
+      ...>     [_, list] = params
+      ...>     list || []
+      ...>   end
+      ...>
+      ...>   rule? list_or_empty_list(:item, :list_tail, "]") do
+      ...>     [item, list_tail, _] = params
+      ...>     [item | (list_tail || [])]
+      ...>   end
+      ...>
+      ...>   rule? list_tail(",", :item, :list_tail) do
+      ...>     [_, item, list_tail] = params
+      ...>     [item | (list_tail || [])]
+      ...>   end
+      ...>
+      ...>   rule item(~r/[0-9]+/) do
+      ...>     [number] = params
+      ...>     String.to_integer(number)
+      ...>   end
+      ...>
+      ...>   rule item(~r/[a-zA-Z]+/) do
+      ...>     [string] = params
+      ...>     string
+      ...>   end
+      ...> end
+      iex> GrammarTest.NumberOfNameListParser.parse("[1, toto, 23]")
+      {:ok, [1, "toto", 23]}
   """
   defmacro rule({name, meta, def}, do: blk) when is_atom(name),
     do: CodeGen.store_clause(__CALLER__.module, name, meta, def, blk, false)

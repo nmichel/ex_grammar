@@ -42,7 +42,7 @@ defmodule Project do
       main: "Grammar",
       extras: ["README.md", "LICENSE.md"],
       groups_for_modules: [
-        Internal: ~r/^Grammar.CodeGen/
+        Internal: [~r/^Grammar.CodeGen/, Grammar.Tokenizer]
       ]
     ]
   end
