@@ -41,8 +41,11 @@ defmodule Project do
 
   defp docs do
     [
-      main: "Grammar",
-      extras: ["README.md", "LICENSE.md"],
+      main: "README",
+      extras: ["README.md", "LICENSE.md", "examples/math_to_french.md", "examples/math_to_function.md", "examples/ip_list.md"],
+      groups_for_extras: [
+        Examples: Path.wildcard("examples/*.md")
+      ],
       groups_for_modules: [
         Internal: [~r/^Grammar.CodeGen/, Grammar.Tokenizer]
       ],
