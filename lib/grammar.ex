@@ -192,6 +192,10 @@ defmodule Grammar do
     #
     productions = CodeGen.build_production_for_rules(rules_with_firsts)
 
+    # Generate rule body functions
+    #
+    rule_clause_body_functions = CodeGen.build_rule_body_functions(rules_with_firsts)
+
     start_rule_name = Module.get_attribute(__CALLER__.module, :start_rule_name)
     start = Map.get(rules_with_firsts, start_rule_name)
 
@@ -223,6 +227,8 @@ defmodule Grammar do
       end
 
       unquote_splicing(productions)
+
+      unquote_splicing(rule_clause_body_functions)
     end
   end
 end

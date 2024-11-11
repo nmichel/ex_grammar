@@ -10,6 +10,13 @@ defmodule Grammar.CodeGen.Clause do
   @enforce_keys [:def, :blk, :epsilon]
   defstruct def: nil, firsts: nil, blk: nil, epsilon: false
 
+  @type t :: %__MODULE__{
+          def: [atom() | binary() | struct()],
+          firsts: [binary() | struct()],
+          blk: any(),
+          epsilon: boolean()
+        }
+
   def new(def, blk, epsilon) when is_list(def) and is_atom(epsilon) do
     struct(__MODULE__, def: def, blk: blk, epsilon: epsilon)
   end
@@ -30,6 +37,11 @@ defmodule Grammar.CodeGen.Rule do
 
   @enforce_keys [:name, :clauses]
   defstruct [:name, :clauses]
+
+  @type t :: %__MODULE__{
+          name: atom(),
+          clauses: [Clause.t()]
+        }
 
   def new(name) when is_atom(name) do
     struct(__MODULE__, name: name, clauses: [])
@@ -158,7 +170,12 @@ defmodule Grammar.CodeGen do
   defp build_production_for_rule({name, %Rule{name: name, clauses: clauses} = rule}) do
     epsilon? = Enum.any?(clauses, &Clause.epsilon?/1)
     no_clause = (epsilon? && epsilon_clause()) || no_clause()
-    nested_clauses = Enum.reduce(clauses, what_are_you_doing_here_clause(), &build_production_for_clause(&1, &2))
+
+    nested_clauses =
+      clauses
+      |> Enum.with_index(&{&1, build_body_clause_name(name, &2)})
+      |> Enum.reduce(what_are_you_doing_here_clause(), &build_production_for_clause(&1, &2))
+
     firsts = Rule.get_firsts(rule)
 
     quote do
@@ -174,18 +191,14 @@ defmodule Grammar.CodeGen do
     end
   end
 
-  defp build_production_for_clause(%Clause{firsts: firsts, blk: blk} = clause, nested_ast) do
+  defp build_production_for_clause({%Clause{firsts: firsts} = clause, clause_function_name}, nested_ast) do
     quote do
       if Enum.any?(unquote(firsts), &TokenExtractor.match?(&1, current_token)) do
         fun_in = []
 
         unquote_splicing(build_production_code_for_clause(clause))
 
-        fun_out =
-          (fn var!(params) ->
-             _ = var!(params)
-             unquote(blk)
-           end).(fun_in)
+        fun_out = unquote(clause_function_name)(fun_in)
 
         {tokenizer, fun_out}
       else
@@ -239,5 +252,26 @@ defmodule Grammar.CodeGen do
     quote do
       throw({cursor, :what_are_you_doing_here})
     end
+  end
+
+  def build_rule_body_functions(rules) do
+    Enum.flat_map(rules, fn {rule_name, %Rule{name: rule_name, clauses: clauses}} ->
+      clauses
+      |> Enum.with_index()
+      |> Enum.map(fn {%Clause{blk: blk}, index} ->
+        function_name = build_body_clause_name(rule_name, index)
+
+        quote do
+          defp unquote(function_name)(var!(params)) do
+            _ = var!(params)
+            unquote(blk)
+          end
+        end
+      end)
+    end)
+  end
+
+  defp build_body_clause_name(rule_name, index) do
+    :"#{rule_name}_clause_#{index}"
   end
 end
