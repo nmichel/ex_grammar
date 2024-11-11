@@ -1,10 +1,12 @@
 defmodule Project do
   use Mix.Project
 
+  @version "0.2.0"
+
   def project do
     [
       app: :grammar,
-      version: "0.1.0",
+      version: @version,
       elixirc_options: [warnings_as_errors: true],
       elixirc_paths: elixirc_paths(Mix.env()),
       consolidate_protocols: Mix.env() != :test,
@@ -42,14 +44,21 @@ defmodule Project do
   defp docs do
     [
       main: "README",
-      extras: ["README.md", "LICENSE.md", "examples/math_to_french.md", "examples/math_to_function.md", "examples/ip_list.md"],
+      extras: [
+        "README.md",
+        "LICENSE.md",
+        "CHANGELOG.md",
+        "examples/math_to_french.md",
+        "examples/math_to_function.md",
+        "examples/ip_list.md"
+      ],
       groups_for_extras: [
         Examples: Path.wildcard("examples/*.md")
       ],
       groups_for_modules: [
         Internal: [~r/^Grammar.CodeGen/, Grammar.Tokenizer]
       ],
-      source_ref: "master"
+      source_ref: "v#{@version}"
     ]
   end
 
