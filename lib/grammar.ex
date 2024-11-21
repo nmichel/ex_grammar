@@ -1,4 +1,6 @@
 defmodule Grammar do
+  defstruct stack: [], rules: %{}, firsts: %{}, heap: []
+
   @moduledoc """
   This module provides a DSL to define parser of structured inputs. Parsers are defined as a grammar.
 
@@ -66,7 +68,189 @@ defmodule Grammar do
       {:ok, "hello world"}
   """
 
+  alias Grammar.Clause
   alias Grammar.CodeGen
+  alias Grammar.Rule
+  alias Grammar.Tokenizer
+  alias Grammar.Tokenizer.TokenExtractor
+
+  @typep first :: term()
+  @typep rules :: %{Rule.name() => Rule.t()}
+
+  # TODO: add a `ready` flag set to false in new and add_clause, and which prepare/1 is responsible for.
+
+  @type t :: %__MODULE__{
+          stack: list(),
+          rules: rules(),
+          firsts: %{Rule.name() => [first()]},
+          heap: list()
+        }
+
+  @type error :: :eof | :no_rule | :no_token
+
+  @spec new() :: t()
+  def new, do: %__MODULE__{}
+
+  @spec add_clause(t(), Rule.name(), Clause.substitution(), Clause.callback(), boolean()) :: t()
+  def add_clause(%__MODULE__{} = grammar, name, substitution, function, epsilon? \\ false) when substitution != [] do
+    rule = Map.get(grammar.rules, name, Rule.new(name, epsilon?))
+    clause = Clause.new(substitution, function)
+    updated_rule = Rule.add_clause(rule, clause)
+    %{grammar | rules: Map.put(grammar.rules, name, updated_rule)}
+  end
+
+  @spec prepare(t()) :: t()
+  def prepare(%__MODULE__{} = grammar) do
+    grammar.rules
+    |> Enum.map(&elem(&1, 1))
+    |> Enum.reduce(grammar, &compute_firsts_for_rule(&2, &1))
+  end
+
+  @spec done?(t()) :: boolean()
+  def done?(%__MODULE__{} = grammar), do: grammar.stack == []
+
+  @spec start(t(), Rule.name()) :: t()
+  def start(%__MODULE__{rules: rules} = grammar, rule_name) when is_map_key(rules, rule_name) do
+    %{grammar | stack: [rule_name]}
+  end
+
+  @spec reset(t()) :: t()
+  def reset(%__MODULE__{} = grammar) do
+    %{grammar | stack: [], heap: []}
+  end
+
+  @spec compute_firsts_for_rule(t(), Rule.t()) :: t()
+  defp compute_firsts_for_rule(%__MODULE__{firsts: firsts} = grammar, %Rule{name: name}) when is_map_key(firsts, name) do
+    grammar
+  end
+
+  defp compute_firsts_for_rule(%__MODULE__{} = grammar, %Rule{} = rule) do
+    {firsts_for_clauses, grammar} = Enum.map_reduce(rule.clauses, grammar, &compute_firsts_for_clause(&2, &1))
+    firsts_updated = Map.put(grammar.firsts, rule.name, firsts_for_clauses)
+    %{grammar | firsts: firsts_updated}
+  end
+
+  @spec compute_firsts_for_clause(t(), Clause.t()) :: {[term()], t()}
+  defp compute_firsts_for_clause(%__MODULE__{firsts: firsts} = grammar, %Clause{substitution: [rule_name | _tail]})
+       when is_map_key(firsts, rule_name) do
+    {Enum.concat(Map.get(firsts, rule_name)), grammar}
+  end
+
+  defp compute_firsts_for_clause(%__MODULE__{} = grammar, %Clause{substitution: [rule_name | _tail]} = clause)
+       when is_atom(rule_name) do
+    grammar
+    |> compute_firsts_for_rule(Map.get(grammar.rules, rule_name))
+    |> compute_firsts_for_clause(clause)
+  end
+
+  defp compute_firsts_for_clause(%__MODULE__{} = grammar, %Clause{substitution: [prototype | _tail]}) do
+    {[prototype], grammar}
+  end
+
+  @spec firsts(t(), Rule.t()) :: [term()]
+  defp firsts(%__MODULE__{} = grammar, %Rule{} = rule), do: Enum.concat(Map.get(grammar.firsts, rule.name))
+
+  @spec step(t(), Tokenizer.t()) ::
+          {:cont, t(), Tokenizer.t()}
+          | {:halt, error(), t(), Tokenizer.t()}
+  def step(%__MODULE__{stack: []} = grammar, %Tokenizer{} = tokenizer), do: {:halt, :eof, grammar, tokenizer}
+
+  def step(%__MODULE__{stack: [name | stack_bottom], rules: rules} = grammar, %Tokenizer{} = tokenizer)
+      when is_atom(name) do
+    rules
+    |> Map.get(name)
+    |> case do
+      nil ->
+        {:halt, :no_rule, grammar, tokenizer}
+
+      rule ->
+        case Tokenizer.current_token(tokenizer, firsts(grammar, rule)) do
+          {{nil, _}, tokenizer} ->
+            if rule.epsilon? do
+              grammar =
+                grammar
+                |> struct(stack: stack_bottom)
+                |> heap_store(nil)
+
+              {:cont, grammar, tokenizer}
+            else
+              {:halt, :no_token, grammar, tokenizer}
+            end
+
+          {{token, _cursor}, tokenizer} ->
+            {:cont, apply_rule(grammar, rule, token), tokenizer}
+        end
+    end
+  end
+
+  def step(%__MODULE__{stack: [token_prototype | stack_bottom]} = grammar, %Tokenizer{} = tokenizer) do
+    case Tokenizer.next_token(tokenizer, token_prototype) do
+      {{nil, _cursor}, tokenizer} ->
+        {:halt, :no_token, grammar, tokenizer}
+
+      {{token, _cursor}, tokenizer} ->
+        # IO.puts("#{token}")
+        grammar =
+          grammar
+          |> struct(stack: stack_bottom)
+          |> heap_store(token)
+
+        {:cont, grammar, tokenizer}
+    end
+  end
+
+  @spec loop(t(), Tokenizer.t()) :: {:ok, any()} | {:error, error()}
+  def loop(%__MODULE__{} = grammar, %Tokenizer{} = tokenizer) do
+    case step(grammar, tokenizer) do
+      {:cont, grammar, tokenizer} ->
+        loop(grammar, tokenizer)
+
+      {:halt, :eof, grammar, _tokenizer} ->
+        {:ok, grammar.heap}
+
+      {:halt, error, _grammar, _tokenizer} ->
+        {:error, error}
+    end
+  end
+
+  @spec apply_rule(t(), Rule.t(), term()) :: t()
+  defp apply_rule(%__MODULE__{stack: [name | stack_bottom]} = grammar, %Rule{name: name} = rule, token) do
+    clause_idx =
+      grammar.firsts
+      |> Map.get(name)
+      |> Enum.find_index(fn firsts_of_clause -> Enum.any?(firsts_of_clause, &TokenExtractor.match?(&1, token)) end)
+
+    clause = Enum.at(rule.clauses, clause_idx)
+
+    stack =
+      clause.substitution
+      |> Kernel.++(stack_bottom)
+
+    grammar
+    |> struct(stack: stack)
+    |> heap_push(clause.function, length(clause.substitution))
+  end
+
+  defp heap_push(grammar, function, slot_count) when slot_count > 0 do
+    %{grammar | heap: [{function, slot_count, []} | grammar.heap]}
+  end
+
+  defp heap_store(%{heap: []} = grammar, value) do
+    %{grammar | heap: value}
+  end
+
+  defp heap_store(%{heap: [{function, slot_count, slots} | bottom]} = grammar, value) when slot_count > 0 do
+    grammar
+    |> struct(heap: [{function, slot_count - 1, slots ++ [value]} | bottom])
+    |> heap_unwind()
+  end
+
+  defp heap_unwind(%{heap: [{function, 0, slots} | bottom]} = grammar) do
+    value = function.(slots)
+    heap_store(%{grammar | heap: bottom}, value)
+  end
+
+  defp heap_unwind(grammar), do: grammar
 
   @doc """
   Use this macro to define rules of your grammar.
