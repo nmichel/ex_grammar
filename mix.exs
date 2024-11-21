@@ -56,7 +56,7 @@ defmodule Project do
         Examples: Path.wildcard("examples/*.md")
       ],
       groups_for_modules: [
-        Internal: [~r/^Grammar.CodeGen/, Grammar.Tokenizer]
+        Internal: [~r/^Grammar.CodeGen/, Grammar.Tokenizer, Grammar.Clause, Grammar.Rule, Grammar.RulesChecker]
       ],
       source_ref: "v#{@version}"
     ]
