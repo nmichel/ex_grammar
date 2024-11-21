@@ -7,7 +7,7 @@ defmodule Project do
     [
       app: :grammar,
       version: @version,
-      elixirc_options: [warnings_as_errors: true],
+      elixirc_options: elixirc_options(Mix.env()),
       elixirc_paths: elixirc_paths(Mix.env()),
       consolidate_protocols: Mix.env() != :test,
       deps: deps(),
@@ -20,8 +20,12 @@ defmodule Project do
     ]
   end
 
+  defp elixirc_paths(:dev), do: ["lib", "test/support"]
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  defp elixirc_options(:dev), do: [warnings_as_errors: false]
+  defp elixirc_options(_), do: [warnings_as_errors: true]
 
   defp deps do
     [

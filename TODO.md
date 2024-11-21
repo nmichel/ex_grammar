@@ -1,3 +1,1 @@
 - Use line info from metada in error reporting
-- Make spaces dropping optional
-- Split code related to code generation in dedicated modules

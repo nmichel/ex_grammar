@@ -71,11 +71,12 @@ defmodule Grammar do
   alias Grammar.Clause
   alias Grammar.CodeGen
   alias Grammar.Rule
+  alias Grammar.RulesChecker
   alias Grammar.Tokenizer
   alias Grammar.Tokenizer.TokenExtractor
 
-  @typep first :: term()
-  @typep rules :: %{Rule.name() => Rule.t()}
+  @type first :: term()
+  @type rules :: %{Rule.name() => Rule.t()}
 
   # TODO: add a `ready` flag set to false in new and add_clause, and which prepare/1 is responsible for.
 
@@ -99,11 +100,26 @@ defmodule Grammar do
     %{grammar | rules: Map.put(grammar.rules, name, updated_rule)}
   end
 
-  @spec prepare(t()) :: t()
+  @spec prepare(t()) ::
+          {:ok, t()}
+          | {:error, :missing_rules, [RulesChecker.miss()]}
+          | {:error, :cycles_found, [RulesChecker.path()]}
+          | {:error, :ambiguities_found, [RulesChecker.ambiguity()]}
   def prepare(%__MODULE__{} = grammar) do
-    grammar.rules
-    |> Enum.map(&elem(&1, 1))
-    |> Enum.reduce(grammar, &compute_firsts_for_rule(&2, &1))
+    with :ok <- RulesChecker.check_all_rules_exist(grammar),
+         :ok <- RulesChecker.check_rules_are_non_left_recursive(grammar),
+         grammar = compute_first(grammar),
+         :ok <- RulesChecker.check_rules_are_not_ambiguous(grammar) do
+      {:ok, grammar}
+    end
+  end
+
+  @spec prepare!(t()) :: t()
+  def prepare!(grammar) do
+    case prepare(grammar) do
+      {:ok, grammar} -> grammar
+      {:error, error_kind, data} -> raise "\n" <> RulesChecker.stringify_error(error_kind, data)
+    end
   end
 
   @spec done?(t()) :: boolean()
@@ -117,6 +133,13 @@ defmodule Grammar do
   @spec reset(t()) :: t()
   def reset(%__MODULE__{} = grammar) do
     %{grammar | stack: [], heap: []}
+  end
+
+  @spec compute_first(t()) :: t()
+  def compute_first(%__MODULE__{} = grammar) do
+    grammar.rules
+    |> Enum.map(&elem(&1, 1))
+    |> Enum.reduce(grammar, &compute_firsts_for_rule(&2, &1))
   end
 
   @spec compute_firsts_for_rule(t(), Rule.t()) :: t()
