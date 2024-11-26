@@ -179,40 +179,37 @@ defmodule Grammar do
   def step(%__MODULE__{stack: []} = grammar, %Tokenizer{} = tokenizer), do: {:halt, :eof, grammar, tokenizer}
 
   def step(%__MODULE__{stack: [name | stack_bottom], rules: rules} = grammar, %Tokenizer{} = tokenizer)
-      when is_atom(name) do
-    rules
-    |> Map.get(name)
-    |> case do
-      nil ->
-        {:halt, :no_rule, grammar, tokenizer}
+      when is_atom(name) and is_map_key(rules, name) do
+    rule = Map.get(rules, name)
 
-      rule ->
-        case Tokenizer.current_token(tokenizer, firsts(grammar, rule)) do
-          {{nil, _}, tokenizer} ->
-            if rule.epsilon? do
-              grammar =
-                grammar
-                |> struct(stack: stack_bottom)
-                |> heap_store(nil)
+    case Tokenizer.current_token(tokenizer, firsts(grammar, rule)) do
+      {{nil, cursor}, tokenizer} ->
+        if rule.epsilon? do
+          grammar =
+            grammar
+            |> struct(stack: stack_bottom)
+            |> heap_store(nil)
 
-              {:cont, grammar, tokenizer}
-            else
-              {:halt, :no_token, grammar, tokenizer}
-            end
-
-          {{token, _cursor}, tokenizer} ->
-            {:cont, apply_rule(grammar, rule, token), tokenizer}
+          {:cont, grammar, tokenizer}
+        else
+          {:halt, {:no_clause_matched, cursor}, grammar, tokenizer}
         end
+
+      {{token, _cursor}, tokenizer} ->
+        {:cont, apply_rule(grammar, rule, token), tokenizer}
     end
+  end
+
+  def step(%__MODULE__{stack: [name | _stack_bottom]}, %Tokenizer{}) when is_atom(name) do
+    raise "Unknown rule: #{name}. Ensure your grammar is Grammar.prepare/1'd."
   end
 
   def step(%__MODULE__{stack: [token_prototype | stack_bottom]} = grammar, %Tokenizer{} = tokenizer) do
     case Tokenizer.next_token(tokenizer, token_prototype) do
-      {{nil, _cursor}, tokenizer} ->
-        {:halt, :no_token, grammar, tokenizer}
+      {{nil, cursor}, tokenizer} ->
+        {:halt, {:no_token, cursor}, grammar, tokenizer}
 
       {{token, _cursor}, tokenizer} ->
-        # IO.puts("#{token}")
         grammar =
           grammar
           |> struct(stack: stack_bottom)
@@ -231,8 +228,8 @@ defmodule Grammar do
       {:halt, :eof, grammar, _tokenizer} ->
         {:ok, grammar.heap}
 
-      {:halt, error, _grammar, _tokenizer} ->
-        {:error, error}
+      {:halt, {error, cursor}, _grammar, _tokenizer} ->
+        {:error, cursor, error}
     end
   end
 
@@ -330,7 +327,7 @@ defmodule Grammar do
       {:ok, [1, "toto", 23]}
   """
   defmacro rule({name, meta, def}, do: blk) when is_atom(name),
-    do: CodeGen.store_clause(__CALLER__.module, name, meta, def, blk, false)
+    do: CodeGen.store_clause(name, meta, def, blk, false)
 
   @doc """
   Same as `rule/2` but relaxed : if the rule cannot be matched, it will be valued as `nil`.
@@ -341,7 +338,7 @@ defmodule Grammar do
   """
 
   defmacro rule?({name, meta, def}, do: blk) when is_atom(name),
-    do: CodeGen.store_clause(__CALLER__.module, name, meta, def, blk, true)
+    do: CodeGen.store_clause(name, meta, def, blk, true)
 
   @allowed_opts [drop_spaces: true]
 
@@ -353,7 +350,7 @@ defmodule Grammar do
       @compile {:inline, []}
 
       @drop_spaces? unquote(drop_spaces?)
-      @rules %{}
+      Module.register_attribute(__MODULE__, :rules, accumulate: true)
 
       @before_compile unquote(__MODULE__)
 
@@ -362,78 +359,24 @@ defmodule Grammar do
   end
 
   defmacro __before_compile__(_env) do
-    all_rules = Module.get_attribute(__CALLER__.module, :rules)
+    all_rules = Module.get_attribute(__CALLER__.module, :rules) |> Enum.reverse()
+
     drop_spaces? = Module.get_attribute(__CALLER__.module, :drop_spaces?)
 
-    # Check for missing rule declarations
-    #
-    case CodeGen.check_all_rules_exist(all_rules) do
-      [] ->
-        :ok
+    grammar_ast = CodeGen.build_grammar(__CALLER__.module, all_rules)
 
-      errors ->
-        errors = Enum.map_join(errors, "\n", fn {name, step} -> "| #{name} misses #{step}" end)
-        raise "\n* Production chain errors\n#{errors}"
-    end
+    rule_clause_body_functions = CodeGen.build_rule_body_functions(all_rules)
 
-    # Build firsts map
-    #
-    rules_with_firsts = CodeGen.first_of_rules(all_rules)
-
-    # Check for ambiguous rules
-    #
-    case CodeGen.check_rules_are_not_ambiguous(rules_with_firsts) do
-      [] ->
-        :ok
-
-      errors ->
-        errors =
-          Enum.map_join(errors, "\n", fn {name, first, clause_ids} ->
-            "| Rule #{name} has conflicts for first #{inspect(first)} on clauses #{inspect(clause_ids)}"
-          end)
-
-        raise "\n* Ambiguous rules\n#{errors}"
-    end
-
-    # Generate parser functions
-    #
-    productions = CodeGen.build_production_for_rules(rules_with_firsts)
-
-    # Generate rule body functions
-    #
-    rule_clause_body_functions = CodeGen.build_rule_body_functions(rules_with_firsts)
-
-    start_rule_name = Module.get_attribute(__CALLER__.module, :start_rule_name)
-    start = Map.get(rules_with_firsts, start_rule_name)
-
-    # Generate parse/1 function
-    #
     quote do
       alias Grammar.Tokenizer
       alias Grammar.Tokenizer.TokenExtractor
 
-      def rules do
-        unquote(Macro.escape(rules_with_firsts))
-      end
+      @grammar unquote(grammar_ast)
 
-      @spec parse(binary()) ::
-              {:ok, term()} | {:error, {integer(), integer()}, atom()} | {:error, {integer(), integer()}, atom(), term()}
       def parse(input) do
-        # credo:disable-for-next-line Credo.Check.Readability.PreferImplicitTry
-        try do
-          tokenizer = Tokenizer.new(input, unquote(drop_spaces?))
-          {tokenizer_final, value} = unquote(start.name)(tokenizer)
-          {:ok, value}
-        catch
-          {where, what} = error ->
-            {:error, where, what}
-
-          {where, what, data} = error ->
-            {:error, where, what, data}
-        end
+        tokenizer = Tokenizer.new(input, unquote(drop_spaces?))
+        Grammar.loop(@grammar, tokenizer)
       end
-
-      unquote_splicing(productions)
 
       unquote_splicing(rule_clause_body_functions)
     end
