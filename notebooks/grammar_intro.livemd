@@ -1,0 +1,110 @@
+# Grammar to parse a comma separated list of numbers
+
+```elixir
+Mix.install(
+  [
+    {:grammar, path: Path.join(__DIR__, ".."), env: :dev}
+  ],
+  lockfile: :grammar
+)
+```
+
+## Grammar with a dedicated callback module
+
+```elixir
+defmodule CB do
+  def list(["[", nil, "]"]), do: []
+  def list(["[", elements, "]"]), do: elements
+
+  def elements?([element, nil]), do: [element]
+  def elements?([element, tail]), do: [element | tail]
+
+  def elements_tail?([",", element, nil]), do: [element]
+  def elements_tail?([",", element, tail]), do: [element | tail]
+
+  def element([number]), do: number
+
+  def number([number_str]), do: String.to_integer(number_str)
+end
+
+grammar =
+  Grammar.new()
+  |> Grammar.add_clause(:list, ["[", :elements?, "]"], &CB.list/1)
+  |> Grammar.add_clause(:elements?, [:element, :elements_tail?], &CB.elements?/1, true)
+  |> Grammar.add_clause(:elements_tail?, [",", :element, :elements_tail?], &CB.elements_tail?/1, true)
+  |> Grammar.add_clause(:element, [:number], &CB.element/1)
+  |> Grammar.add_clause(:number, [~r/[0-9]+/], &CB.number/1)
+  |> Grammar.prepare!()
+  |> Grammar.start(:list)
+```
+
+## Parse some valid inputs
+
+```elixir
+# Empty list
+Grammar.loop(grammar, Grammar.Tokenizer.new("[]"))
+```
+
+```elixir
+# Single item list
+Grammar.loop(grammar, Grammar.Tokenizer.new("[12]"))
+```
+
+```elixir
+# Regular list
+Grammar.loop(grammar, Grammar.Tokenizer.new("[42, 53, 453]"))
+```
+
+## Try parse invalid inputs
+
+```elixir
+Grammar.loop(grammar, Grammar.Tokenizer.new("ident"))
+```
+
+```elixir
+Grammar.loop(grammar, Grammar.Tokenizer.new("[12,"))
+```
+
+```elixir
+Grammar.loop(grammar, Grammar.Tokenizer.new("[12,]"))
+```
+
+## Changing the start rule
+
+Changing the starting rule allows for testing a sub-part of a grammar.
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Change `grammar` to start at rule `:element`
+
+Only a number can be extracted from the input
+
+```elixir
+grammar = Grammar.start(grammar, :element)
+Grammar.loop(grammar, Grammar.Tokenizer.new("12"))
+```
+
+Trying to reading anything else will fail
+
+```elixir
+Grammar.loop(grammar, Grammar.Tokenizer.new("[12]"))
+```
+
+### Change `grammar` to start at rule `:elements_tail?`
+
+The parser can now extract "nothing" (as `:elements_tail?` is an `epsilon` rule), or a a list of `, <number>`.
+
+```elixir
+grammar = Grammar.start(grammar, :elements_tail?)
+Grammar.loop(grammar, Grammar.Tokenizer.new(""))
+```
+
+```elixir
+Grammar.loop(grammar, Grammar.Tokenizer.new(", 122, 134"))
+```
+
+Again, trying to reading anything else will fail
+
+```elixir
+Grammar.loop(grammar, Grammar.Tokenizer.new("122, 134"))
+```

@@ -1,0 +1,129 @@
+# Musing with CodeGen
+
+```elixir
+Mix.install(
+  [
+    {:grammar, path: Path.join(__DIR__, ".."), env: :dev}
+  ],
+  lockfile: :grammar
+)
+```
+
+## Defining a grammar with CodeGen.Clause
+
+Let's define `target_module_name` as holding the name of the module we want to define as a specialized parser module.
+
+This binding will be used all along this livebook when it comes to refer to the module name.
+
+```elixir
+target_module_name = Pouet
+```
+
+Now define the clauses that will constitute the grammar.
+
+```elixir
+alias Grammar.CodeGen
+
+grammar_clauses = [
+  Grammar.CodeGen.Clause.new(:foo_bar, quote do [:foo] end, Code.string_to_quoted!(~S/[what] = params; "Found foo #{what} " <> <<0x1F92A::utf8>>/), false),
+  Grammar.CodeGen.Clause.new(:foo_bar, quote do [:bar] end, Code.string_to_quoted!(~S/[what] = params; "Found bar #{what} " <> <<0x1F92A::utf8>>/), false),
+
+  # Here we use Code.string_to_quoted!/1 to ensure the context in quotes is `nil` as it would be during compilation.
+  # Simply quoting would result in quoted expression in the context of `Elixir` as we are here evaluating the code (and not compiling it).
+  # 
+  # Another option in our current context of evaluating things, is to explicitly state that params should be NOT hygienized
+  # e.g. Grammar.CodeGen.Clause.new(:foo, quote do ["foo"] end, quote do [foo] = var!(params); "#{foo} " <> <<0x1F600::utf8>> <> " !" end, false)
+  Grammar.CodeGen.Clause.new(:foo, quote do ["foo"] end, Code.string_to_quoted!(~S/[foo] = params; "#{foo} " <> <<0x1F601::utf8>> <> " !"/), false),
+
+  Grammar.CodeGen.Clause.new(:bar, quote do ["bar"] end, Code.string_to_quoted!(~S/[bar] = params; "#{bar} " <> <<0x1F601::utf8>> <> " !"/), false)
+]
+
+```
+
+## Generating and using a grammar
+
+```elixir
+grammar_definition_ast = Grammar.CodeGen.build_grammar(target_module_name, grammar_clauses)
+```
+
+### output the generated code in its Elixir form
+
+```elixir
+grammar_definition_ast
+|> Macro.to_string()
+|> IO.puts()
+```
+
+### Manually define the callback module that fits the grammar and make some tests
+
+```elixir
+quote do
+  defmodule unquote(target_module_name) do
+    def clause_0_foo_bar([what]), do: "foo #{what}"
+    def clause_1_foo_bar([what]), do: "bar #{what}"
+    def clause_0_foo(["foo"]), do: "foo"
+    def clause_0_bar(["bar"]), do: "bar"
+  end
+end
+|> Code.eval_quoted()
+
+{grammar, _bindings} = Code.eval_quoted(grammar_definition_ast)
+
+Grammar.loop(grammar, Grammar.Tokenizer.new("foo")) |> IO.inspect()
+Grammar.loop(grammar, Grammar.Tokenizer.new("bar")) |> IO.inspect()
+```
+
+The module we just define manually does NOT export the `parse/1` function unlike the generated modules.
+
+```elixir
+try do
+  target_module_name.parse("coucou")
+rescue
+  e in UndefinedFunctionError -> e
+end
+```
+
+## Use CodeGen to produce the callback module
+
+### Generate the code of the callback functions refered to in the grammar clauses.
+
+```elixir
+callback_functions_ast = Grammar.CodeGen.build_rule_body_functions(grammar_clauses)
+```
+
+### output the generated code in its Elixir form
+
+```elixir
+callback_functions_ast
+|> Macro.to_string()
+|> IO.puts()
+```
+
+### (re)Define the callback module using generated function bodies
+
+```elixir
+{{:module, module_name, code, _exported_funs}, _bindings} = 
+quote do
+  defmodule unquote(target_module_name) do
+    # Use var!/1 to avoid the compiler sanitize `code`
+    # as its value in passed through bindings
+    @grammar unquote(grammar_definition_ast)
+    
+    unquote_splicing(callback_functions_ast)
+
+    def parse(input) do
+      tokenizer = Grammar.Tokenizer.new(input)
+      Grammar.loop(@grammar, tokenizer)
+    end
+  end
+end
+|> Code.eval_quoted()
+```
+
+```elixir
+module_name.parse("foo")
+```
+
+```elixir
+module_name.parse("bar")
+```
