@@ -1,0 +1,68 @@
+# Intro to DSL : parse a comma separated list of identifiers
+
+```elixir
+Mix.install(
+  [
+    {:grammar, path: Path.join(__DIR__, ".."), env: :dev}
+  ],
+  lockfile: :grammar
+)
+```
+
+## Section
+
+```elixir
+defmodule MyGrammar do
+  use Grammar
+
+  rule list("[", :list?, "]") do
+    [_, list, _] = params
+    list || []
+  end
+
+  # A maybe empty
+  rule? list?(:element, :list_cont?) do
+    [element, list_cont] = params
+    [element | list_cont || []]
+  end
+
+  # An element of the list matches a peculiar regex
+  rule element(~r/[a-zA-Z]+/) do
+    [element] = params
+    element
+  end
+
+  # List continuation may be empty
+  rule? list_cont?(",", :element, :list_cont?) do
+    [_, element, list_cont] = params
+    [element | list_cont || []]
+  end
+end
+```
+
+## Parse some valid inputs
+
+```elixir
+# Empty list
+IO.inspect(MyGrammar.parse("[]"))
+
+# Single item list
+IO.inspect(MyGrammar.parse("[a]"))
+
+# Regular list
+IO.inspect(MyGrammar.parse("[a, bb, ccc]"))
+```
+
+## Try parse invalid inputs
+
+```elixir
+MyGrammar.parse("ident")
+```
+
+```elixir
+MyGrammar.parse("[ident")
+```
+
+```elixir
+MyGrammar.parse("[ident,]")
+```
