@@ -1,6 +1,16 @@
 # Intro to DSL : parse a comma separated list of identifiers
 
 ```elixir
+Mix.install([:grammar])
+```
+
+## Local setup
+
+To use this livebook within a local clone the project, use the following setup, and launch the livebook from it's directory.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
 Mix.install(
   [
     {:grammar, path: Path.join(__DIR__, ".."), env: :dev}

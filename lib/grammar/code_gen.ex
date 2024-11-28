@@ -1,6 +1,8 @@
 defmodule Grammar.CodeGen.Clause do
   @moduledoc """
-  TODO:
+  Stores a clause definition.
+
+  `Clauses` are used to produce code, so parameters `def` and `blk` must be quoted expressions.
   """
 
   @enforce_keys [:name, :def, :blk, :epsilon]
@@ -13,6 +15,9 @@ defmodule Grammar.CodeGen.Clause do
           epsilon: boolean()
         }
 
+  @doc """
+  Create a new clause with a given name, definition, block and epsilon flag.
+  """
   def new(name, def, blk, epsilon) when is_list(def) and is_atom(epsilon) do
     struct(__MODULE__, name: name, def: def, blk: blk, epsilon: epsilon)
   end
@@ -21,10 +26,16 @@ end
 defmodule Grammar.CodeGen do
   @moduledoc """
   This module exposes functions required to generate the code for the parser derived from grammar rules.
+
+  It uses `Clause` struct to store the definition of clauses. `Clause`s sharing the same `name` are
+  considered as clauses of a single rule.
   """
 
   alias Grammar.CodeGen.Clause
 
+  @doc """
+  Produces the quoted expression of the code that stores a clause definition in the current module.
+  """
   def store_clause(rule_name, _meta, def, blk, epsilon) do
     def = Macro.escape(def)
     blk = Macro.escape(blk)
@@ -34,6 +45,9 @@ defmodule Grammar.CodeGen do
     end
   end
 
+  @doc """
+  Produces the quoted expression of the code that builds the grammar from the stored clauses.
+  """
   def build_grammar(module, clauses) do
     start_rule_name = hd(clauses).name
 
@@ -65,6 +79,9 @@ defmodule Grammar.CodeGen do
     end
   end
 
+  @doc """
+  Produces the list of quoted expressions of callback functions, on for each clause.
+  """
   def build_rule_body_functions(rules) do
     rules
     |> Enum.group_by(& &1.name)

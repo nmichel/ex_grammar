@@ -20,7 +20,6 @@ defmodule Project do
     ]
   end
 
-  defp elixirc_paths(:dev), do: ["lib", "test/support"]
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
@@ -52,15 +51,20 @@ defmodule Project do
         "README.md",
         "LICENSE.md",
         "CHANGELOG.md",
-        "examples/math_to_french.md",
-        "examples/math_to_function.md",
-        "examples/ip_list.md"
+        "examples/dsl/math_to_french.md",
+        "examples/dsl/math_to_function.md",
+        "examples/dsl/ip_list.md",
+        "notebooks/dsl_intro.livemd",
+        "notebooks/grammar_intro.livemd",
+        "notebooks/musing_with_codegen.livemd"
       ],
       groups_for_extras: [
-        Examples: Path.wildcard("examples/*.md")
+        "DSL Examples": Path.wildcard("examples/dsl/*.md"),
+        Livebooks: Path.wildcard("notebooks/*.livemd")
       ],
       groups_for_modules: [
-        Internal: [~r/^Grammar.CodeGen/, Grammar.Tokenizer, Grammar.Clause, Grammar.Rule, Grammar.RulesChecker]
+        Internal: [Grammar.Clause, Grammar.Rule, Grammar.RulesChecker],
+        "Code generation": [~r/^Grammar.CodeGen/]
       ],
       source_ref: "v#{@version}"
     ]
