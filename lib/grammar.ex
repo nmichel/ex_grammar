@@ -1,10 +1,12 @@
 defmodule Grammar do
   defstruct stack: [], rules: %{}, firsts: %{}, heap: []
 
-  @moduledoc """
-  This module provides a DSL to define parser of structured inputs. Parsers are defined as a grammar.
+  @moduledoc ~S"""
+  This module exposes functions and macros to create parsers of structured inputs. Parsers are defined as LL(1) grammars.
 
-  Grammar defined must be LL(1) grammars, i.e. they must be unambiguous and have a single token lookahead.
+  A grammar must be LL(1), i.e. must be unambiguous and have a single token lookahead.
+
+  One can create parsers at runtime, using the `Grammar` functions, or define parsers at compile time using the `Grammar` macros.
 
   The grammar is defined by a set of rules, each rule being a set of clauses. Clauses must be understood as
   disjoinded paths in the rule resolution, or as the `or` operator in the classic notation.
@@ -12,17 +14,42 @@ defmodule Grammar do
   The tokenization process relies on the [TokenExtractor](`Grammar.Tokenizer.TokenExtractor`) protocol, which is used to extract tokens from the input string.
   This protocol is implemented for BitString and Regex, and can be extended to custom token types.
 
+  ### Spaces and line breaks handling
+
+  By default, the tokenizer will drop spaces and line breaks.
+
+  If you want to keep them, you can pass the `drop_spaces: false` option to the `use Grammar` macro.
+
+  When using the Tokenizer directly, you must pass `false` as second parameter to `Tokenizer.new/2` to keep spaces and line breaks.
+
+  In this case, you are fully responsible for handling spaces and line breaks in your rules.
+
+  # Using the API
+
+  Creating a new grammar is done by calling `Grammar.new/0`, then adding clauses to it using `Grammar.add_clause/5`.
+
+  Once all the rules are defined, the grammar must be prepared using `Grammar.prepare/1`.
+
+  The grammar is then ready to be used for parsing, by calling `Grammar.start/2` with the starting rule name,
+  and then `Grammar.loop/2` with the input string wrapped in a `Tokenizer`.
+
+  #### Example
+
+      iex> g = Grammar.new()
+      ...> |> Grammar.add_clause(:start, ["hello", :what], fn ["hello", what] -> "hello #{what} !" end)
+      ...> |> Grammar.add_clause(:what, [~r/[a-zA-Z]+/], fn [ident] -> ident end)
+      ...> |> Grammar.prepare!()
+      ...> |> Grammar.start(:start)
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("hello world"))
+      {:ok, "hello world !"}
+
+  # Using the DSL
+
   To declare a parser module, just `use` the Grammar module in your module, and define your rules using the `rule/2` and `rule?/2` macro.
   The newly defined module will expose a `parse/1` function that will parse the input string, and return a tuple with the
   tokenizer in its final state, and result.
 
   See `rule/2` for a full example.
-
-  ## Spaces and line breaks handling
-
-  By default, the tokenizer will drop spaces and line breaks.
-  If you want to keep them, you can pass the `drop_spaces: false` option to the `use Grammar` macro. In this case, you
-  are fully responsible for handling spaces and line breaks in your rules.
 
   ## Options
 
@@ -57,14 +84,14 @@ defmodule Grammar do
       ...>
       ...>   # spaces and linebreaks not handled
       ...>
-      ...>   rule start("hello", ~r/[\\s]+/, "world") do
+      ...>   rule start("hello", ~r/[\s]+/, "world") do
       ...>     [_hello, _spaces, _world] = params
       ...>     "hello world"
       ...>   end
       ...> end
       iex> MyModuleOK.parse("helloworld")
       {:error, {1, 6}, :no_token}
-      iex> MyModuleOK.parse(~s/hello  \\t world/)
+      iex> MyModuleOK.parse(~s/hello  \t world/)
       {:ok, "hello world"}
   """
 
@@ -78,8 +105,6 @@ defmodule Grammar do
   @type first :: term()
   @type rules :: %{Rule.name() => Rule.t()}
 
-  # TODO: add a `ready` flag set to false in new and add_clause, and which prepare/1 is responsible for.
-
   @type t :: %__MODULE__{
           stack: list(),
           rules: rules(),
@@ -87,11 +112,76 @@ defmodule Grammar do
           heap: list()
         }
 
-  @type error :: :eof | :no_rule | :no_token
+  @type error_type :: :no_clause_matched | :no_token
+  @type error :: {error_type(), term()}
 
+  @doc """
+  Create a new empty `Grammar`.
+  """
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
+  @doc """
+  Add a clause to the grammar.
+
+  A clause is defined by a name, a substitution, a function to execute when the clause is matched, and an epsilon flag.
+
+  Clauses sharing the same name are considered as clauses of a single rule.
+
+  The substitution is a list of terms which declares the steps to match the clause, from left to right, first to last.
+
+  Each term can be either
+  - a rule name, which is an atom,
+  - a value for which there is a [TokenExtractor](`Grammar.Tokenizer.TokenExtractor`) protocol implementation.
+
+  [TokenExtractor](`Grammar.Tokenizer.TokenExtractor`) implementations are provided for BitString and Regex, and can be extended to custom token types.
+
+  The function is a callback to execute when the clause is fully matched. It is given a list as parameter, each element
+  of that list is the value produced by the substitution of each term.
+
+  The epsilon flag indicates if the rule is mandatory or not.
+
+  > ⚠️ the epsilon flag is used only when the *first clause of a rule* is added, even if it is defaulted to `false`.
+
+  ## Example
+
+  The *second* clause of `:start` is marked as epsilon, but it is ignored.
+
+      iex> g = Grammar.new()
+      ...> |> Grammar.add_clause(:start, ["hello"], fn [value] -> value end)
+      ...> |> Grammar.add_clause(:start, ["world"], fn [value] -> value end, true) # `true` is ignored !
+      ...> |> Grammar.prepare!()
+      ...> |> Grammar.start(:start)
+      ...>
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("hello"))
+      {:ok, "hello"}
+      ...>
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("world"))
+      {:ok, "world"}
+      ...>
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("pouet"))
+      {:error, {1, 1}, :no_clause_matched}
+
+
+  The *first* clause of `:start` is marked as epsilon !
+
+      iex> g = Grammar.new()
+      ...> |> Grammar.add_clause(:start, ["hello"], fn [value] -> value end, true) # `true` is used !
+      ...> |> Grammar.add_clause(:start, ["world"], fn [value] -> value end, false) # `false` is ignored !
+      ...> |> Grammar.prepare!()
+      ...> |> Grammar.start(:start)
+      ...>
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("hello"))
+      {:ok, "hello"}
+      ...>
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("world"))
+      {:ok, "world"}
+      ...>
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("pouet"))
+      {:ok, nil}
+
+
+  """
   @spec add_clause(t(), Rule.name(), Clause.substitution(), Clause.callback(), boolean()) :: t()
   def add_clause(%__MODULE__{} = grammar, name, substitution, function, epsilon? \\ false) when substitution != [] do
     rule = Map.get(grammar.rules, name, Rule.new(name, epsilon?))
@@ -100,6 +190,13 @@ defmodule Grammar do
     %{grammar | rules: Map.put(grammar.rules, name, updated_rule)}
   end
 
+  @doc """
+  Use this function after defining all the rules of the grammar to prepare the grammar for parsing.
+
+  This function will proceed to grammar validation, and returns errors if any are found.
+
+  > ⚠️ A grammar that is not prepared cannot be used for parsing, so `step/2` and `loop/2` will behave unexpectedly.
+  """
   @spec prepare(t()) ::
           {:ok, t()}
           | {:error, :missing_rules, [RulesChecker.miss()]}
@@ -114,6 +211,9 @@ defmodule Grammar do
     end
   end
 
+  @doc """
+  Same as prepare/1 but raises a RuntimeError if an error is found.
+  """
   @spec prepare!(t()) :: t()
   def prepare!(grammar) do
     case prepare(grammar) do
@@ -122,19 +222,58 @@ defmodule Grammar do
     end
   end
 
+  @doc false
   @spec done?(t()) :: boolean()
   def done?(%__MODULE__{} = grammar), do: grammar.stack == []
 
+  @doc """
+  Reset the grammar to its initial state, and set the starting rule name.
+
+  Usually this function is called once before `loop/2`to process some input.
+
+  Other usage may be to start at different rules within the same grammar, mainly for in dev testing.
+
+  ## Example
+
+      iex> g = Grammar.new()
+      ...> |> Grammar.add_clause(:start, ["<", :lists?, ">"], fn [_, ls, _] -> ls || [] end)
+      ...> |> Grammar.add_clause(:lists?, [:list, :lists?], fn [l, ls] -> [l | ls || []] end, true)
+      ...> |> Grammar.add_clause(:list, ["[", :elements?, "]"], fn [_, es, _] -> es || [] end)
+      ...> |> Grammar.add_clause(:elements?, [:element, :elements?], fn [e, es] -> [e | es || []] end, true)
+      ...> |> Grammar.add_clause(:element, [~r/[a-z]+/], fn [value] -> value end)
+      ...> |> Grammar.prepare!()
+      ...>
+      iex> g
+      ...> |> Grammar.start(:start)
+      ...> |> Grammar.loop(Grammar.Tokenizer.new("<[a b c] [dd ee ff]>"))
+      {:ok, [["a", "b", "c"], ["dd", "ee", "ff"]]}
+      ...>
+      iex> g = Grammar.start(g, :element)
+      ...> Grammar.loop(g, Grammar.Tokenizer.new("<[a b c] [dd ee ff]>"))
+      {:error, {1, 1}, :no_clause_matched}
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("ff"))
+      {:ok, "ff"}
+      iex> g = Grammar.start(g, :list)
+      ...> Grammar.loop(g, Grammar.Tokenizer.new("<[a b c] [dd ee ff]>"))
+      {:error, {1, 1}, :no_clause_matched}
+      iex> Grammar.loop(g, Grammar.Tokenizer.new("[a b c]"))
+      {:ok, ["a", "b", "c"]}
+
+  """
   @spec start(t(), Rule.name()) :: t()
   def start(%__MODULE__{rules: rules} = grammar, rule_name) when is_map_key(rules, rule_name) do
-    %{grammar | stack: [rule_name]}
+    grammar
+    |> reset()
+    |> struct(stack: [rule_name])
   end
 
+  @doc false
   @spec reset(t()) :: t()
   def reset(%__MODULE__{} = grammar) do
     %{grammar | stack: [], heap: []}
   end
 
+  @doc false
   @spec compute_first(t()) :: t()
   def compute_first(%__MODULE__{} = grammar) do
     grammar.rules
@@ -173,8 +312,38 @@ defmodule Grammar do
   @spec firsts(t(), Rule.t()) :: [term()]
   defp firsts(%__MODULE__{} = grammar, %Rule{} = rule), do: Enum.concat(Map.get(grammar.firsts, rule.name))
 
+  @doc """
+  Step once in the input Tokenizer, using `grammar`.
+
+  This function returns a tuple which first term is either `:cont` or `:halt`.
+
+  -  `:cont`: the second term is the updated `grammar` and the third term is the updated `tokenizer`.
+  -  `:halt`: the second term is an error tuple, the third term is the position of the error in the input string, the fourth term is the `grammar` and the fifth term is the `tokenizer`.
+
+  This function is used internally by `loop/2`, though it can be used to manually step through the parsing process.
+
+  ## Example
+
+  It takes 5 steps to reach the fist element of the input list.
+
+      iex> grammar = Grammar.new()
+      ...> |> Grammar.add_clause(:start, [:loop?], &Enum.at(&1, 0, []))
+      ...> |> Grammar.add_clause(:loop?, [:element, :loop?], fn [head, tail] -> [head | tail || []] end, true)
+      ...> |> Grammar.add_clause(:element, [:ident], &Enum.at(&1, 0))
+      ...> |> Grammar.add_clause(:ident, [~r/[a-z]+/], fn [ident] ->  ident end)
+      ...> |> Grammar.prepare!()
+      ...> |> Grammar.start(:start)
+      iex> tokenizer = Grammar.Tokenizer.new("a b c d")
+      iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
+      iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
+      iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
+      iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
+      iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
+      iex> [{_callback, 1, ["a"]} | _] = grammar.heap
+  """
   @spec step(t(), Tokenizer.t()) ::
           {:cont, t(), Tokenizer.t()}
+          | {:halt, :eof, t(), Tokenizer.t()}
           | {:halt, error(), t(), Tokenizer.t()}
   def step(%__MODULE__{stack: []} = grammar, %Tokenizer{} = tokenizer), do: {:halt, :eof, grammar, tokenizer}
 
@@ -219,6 +388,9 @@ defmodule Grammar do
     end
   end
 
+  @doc """
+  Process the input tokenizer, until completion or error.
+  """
   @spec loop(t(), Tokenizer.t()) :: {:ok, any()} | {:error, error()}
   def loop(%__MODULE__{} = grammar, %Tokenizer{} = tokenizer) do
     case step(grammar, tokenizer) do

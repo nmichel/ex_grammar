@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2024-11-29
+
+### Added
+
+- `Grammar` now exposes a public API to build grammar processors at runtime.
+- Some livebooks.
+
+### Changed 
+
+- Revamp code generation to use the new public API.
+- Stack depth during input processing is now bound to grammar size, not to input size.
 
 ## [0.2.0] - 2024-11-11
 
@@ -20,6 +30,6 @@
 
 
 # Diff
-[unreleased](https://github.com/nmichel/ex_grammar//compare/v0.1.0...HEAD)
-
+[0.3.0](https://github.com/nmichel/ex_grammar/releases/tag/v0.3.0)
 [0.1.0](https://github.com/nmichel/ex_grammar/releases/tag/v0.1.0)
+[0.2.0](https://github.com/nmichel/ex_grammar/releases/tag/v0.2.0)
