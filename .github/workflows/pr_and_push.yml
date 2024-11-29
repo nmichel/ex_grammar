@@ -1,0 +1,92 @@
+name: Push to master and PR CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up elixir
+        id: elixir-install
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Restore dependencies/compile cache
+        uses: actions/cache/restore@v3
+        id: mix-cache
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ steps.elixir-install.outputs.elixir-version }}-${{ steps.elixir-install.outputs.otp-version }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-
+
+      - name: Cache status
+        run: |
+          [ "${{ steps.mix-cache.outputs.cache-hit }}" == "true" ] \
+          && echo "Cache is up-to-date, will skip mix deps tasks" \
+          || echo "Cache MISS: looked up ${{ steps.mix-cache.outputs.cache-primary-key }} but found ${{ steps.mix-cache.outputs.cache-matched-key }}. Will run mix tasks."
+    
+      - name: Install dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: mix deps.get --check-locked
+
+      - name: Look out for unused dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: mix deps.unlock --check-unused
+
+      - name: Look out for deprecated dependencies
+        run: mix hex.audit
+
+      - name: Look out for security vulnerable dependencies
+        run: mix deps.audit
+
+      # 3 following steps taken from dialyxir's documentation
+      # https://github.com/jeremyjh/dialyxir/blob/0091928de1ec01e30f82c50856f2dfe0a8f918ce/docs/github_actions.md
+
+      - name: Restore PLT cache
+        id: plt_cache
+        uses: actions/cache/restore@v3
+        with:
+          key: |
+            plt-${{ runner.os }}-${{ steps.elixir-install.outputs.otp-version }}-${{ steps.elixir-install.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            plt-${{ runner.os }}-${{ steps.elixir-install.outputs.otp-version }}-${{ steps.elixir-install.outputs.elixir-version }}-
+          path: |
+            priv/plts
+
+      # Create dialyzer's PLTs if no cache was found
+      - name: Create PLTs
+        if: steps.plt_cache.outputs.cache-hit != 'true'
+        run: mix dialyzer --plt
+
+      # By default, the GitHub Cache action will only save the cache if all steps in the job succeed,
+      # so we separate the cache restore and save steps in case running dialyzer fails.
+      - name: Save PLT cache
+        id: plt_cache_save
+        uses: actions/cache/save@v3
+        if: steps.plt_cache.outputs.cache-hit != 'true'
+        with:
+          key: |
+            plt-${{ runner.os }}-${{ steps.elixir-install.outputs.otp-version }}-${{ steps.elixir-install.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+          path: |
+            priv/plts
+
+      - name: Check
+        run: mix check
+
+      - name: Run tests
+        run: mix test
