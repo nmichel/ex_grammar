@@ -338,7 +338,7 @@ defmodule Grammar do
       iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
       iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
       iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
-      iex> {:cont, grammar, tokenizer} = Grammar.step(grammar, tokenizer)
+      iex> {:cont, grammar, _tokenizer} = Grammar.step(grammar, tokenizer)
       iex> [{_callback, 1, ["a"]} | _] = grammar.heap
   """
   @spec step(t(), Tokenizer.t()) ::

@@ -9,7 +9,7 @@ defmodule Project do
       version: @version,
       elixirc_options: elixirc_options(Mix.env()),
       elixirc_paths: elixirc_paths(Mix.env()),
-      consolidate_protocols: Mix.env() != :test,
+      consolidate_protocols: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
       name: "Grammar",

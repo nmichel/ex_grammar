@@ -8,13 +8,14 @@ defmodule Grammar.Tokenizer do
   alias Grammar.Tokenizer.TokenExtractor
 
   @enforce_keys [:input, :drop_spaces?]
-  defstruct input: "", current_line: 1, current_column: 1, drop_spaces?: true
+  defstruct input: "", current_line: 1, current_column: 1, drop_spaces?: true, sub_byte_matching?: false
 
   @type t :: %__MODULE__{
           input: binary(),
           current_line: integer(),
           current_column: integer(),
-          drop_spaces?: boolean()
+          drop_spaces?: boolean(),
+          sub_byte_matching?: boolean()
         }
 
   @newlines ~c[\n]
@@ -47,8 +48,8 @@ defmodule Grammar.Tokenizer do
       }
   """
   @spec new(binary(), boolean()) :: t()
-  def new(input, drop_spaces? \\ true) when is_binary(input) do
-    struct(__MODULE__, input: input, drop_spaces?: drop_spaces?)
+  def new(input, drop_spaces? \\ true, sub_byte_matching? \\ false) when is_bitstring(input) do
+    struct(__MODULE__, input: input, drop_spaces?: drop_spaces?, sub_byte_matching?: sub_byte_matching?)
     |> maybe_drop_spaces()
   end
 
@@ -120,6 +121,11 @@ defmodule Grammar.Tokenizer do
   end
 
   @spec consume_token(t(), integer()) :: t()
+  defp consume_token(%__MODULE__{sub_byte_matching?: true} = tokenizer, token_length) do
+    <<_token::size(token_length), rest::bitstring>> = tokenizer.input
+    %{tokenizer | input: rest, current_column: tokenizer.current_column + token_length}
+  end
+
   defp consume_token(%__MODULE__{} = tokenizer, token_length) do
     input = tokenizer.input
     {token_string, rest} = String.split_at(input, token_length)
