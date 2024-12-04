@@ -28,6 +28,10 @@ defmodule Grammar.Tokenizer do
 
     - input: bitstring from which token will be extracted.
     - drop_spaces?: when set to `false`, the tokenizer will not drop spaces and newlines.
+    - sub_byte_matching? : when set to `true`, the tokenizer will match tokens at the bit level.
+
+  > When bit level matching is enabled, the tokenizer will not drop spaces and newlines (obviously) and errors are
+  reported at line 1, and column set  at the current bit index (starting at the begin of the input bitstring).
 
   ## Examples
 
@@ -36,7 +40,8 @@ defmodule Grammar.Tokenizer do
         input: "this is the input",
         current_line: 1,
         current_column: 1,
-        drop_spaces?: true
+        drop_spaces?: true,
+        sub_byte_matching?: false
       }
 
       iex> Grammar.Tokenizer.new("this is the input", false)
@@ -44,7 +49,8 @@ defmodule Grammar.Tokenizer do
         input: "this is the input",
         current_line: 1,
         current_column: 1,
-        drop_spaces?: false
+        drop_spaces?: false,
+        sub_byte_matching?: false
       }
   """
   @spec new(binary(), boolean()) :: t()
@@ -66,7 +72,8 @@ defmodule Grammar.Tokenizer do
         input: "hello world",
         current_line: 1,
         current_column: 1,
-        drop_spaces?: true
+        drop_spaces?: true,
+        sub_byte_matching?: false
       }
       iex> {{"hello", {1, 1}}, _} = Grammar.Tokenizer.current_token(tokenizer, ["hello"])
       iex> {{"hello", {1, 1}}, _} = Grammar.Tokenizer.current_token(tokenizer, ["hello"])

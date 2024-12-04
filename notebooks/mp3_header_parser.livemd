@@ -1,6 +1,10 @@
-# MP3 header parser (naïve)
+# Bit level parsing // MP3 header parser
 
-## Section
+## One token module per header element
+
+One way to cope with the problem it to create one specific token type for each part of the header.
+
+This allow for catching errors at the lowest level, relieving callbacks of handling errors.
 
 ```elixir
 defmodule FrameSync do
@@ -64,6 +68,9 @@ defimpl Grammar.Tokenizer.TokenExtractor, for: LayerDescription do
   def match?(_token_prototype, _token), do: false
 end
 
+```
+
+```elixir
 # Forbidden
 nil = Grammar.Tokenizer.TokenExtractor.try_read(LayerDescription.new(), <<0::2>>)
 
@@ -199,6 +206,8 @@ test_header = <<
 >>
 ```
 
+With all those token types, the grammar is basically a one-liner, i.e. a single call to `add_clause`.
+
 ```elixir
 Grammar.new()
 |> Grammar.add_clause(:mp3_header, [
@@ -232,4 +241,156 @@ end)
 |> Grammar.prepare!()
 |> Grammar.start(:mp3_header)
 |> Grammar.loop(Grammar.Tokenizer.new(test_header, false, true))
+```
+
+## A finer approach with generic tokens and rules
+
+Lets define a generic token that matches a span of bits with a specific length.
+
+When using a `BitSpan` entity as a constant value in a rule definition, the user is responsible for providing a value that accounts for endianess, wich is `big` (Elixir default mode) in the following implementation.
+
+The same when interpreting the value extracted by the token, in callback functions.
+
+```elixir
+defmodule BitSpan do
+  defstruct [:size, :value]
+
+  def new(size, value \\ nil) when is_integer(size) do
+    %__MODULE__{size: size, value: value}
+  end
+end
+
+defimpl Grammar.Tokenizer.TokenExtractor, for: BitSpan do
+  def try_read(%BitSpan{size: size, value: nil}, input) do
+    case input do
+      <<value::size(size), _rest::bitstring>> -> {BitSpan.new(size, value), size}
+      _ -> nil
+    end
+  end
+
+  def try_read(%BitSpan{size: size, value: value}, input) do
+    case input do
+      <<^value::size(^size), _rest::bitstring>> -> {BitSpan.new(size, value), size}
+      _ -> nil
+    end
+  end
+  
+  def try_read(_token_prototype, _input), do: nil
+
+  def match?(%BitSpan{value: nil}, %BitSpan{}), do: true
+  def match?(version, version), do: true
+  def match?(_token_prototype, _token), do: false
+end
+```
+
+```elixir
+# Capture
+{%{value: 2, size: 2} , 2} = Grammar.Tokenizer.TokenExtractor.try_read(BitSpan.new(2), <<2::2>>)
+
+# Match !
+{%{value: 3, size: 2}, 2} = Grammar.Tokenizer.TokenExtractor.try_read(BitSpan.new(2, 3), <<3::2>>)
+
+# Match Error!
+nil = Grammar.Tokenizer.TokenExtractor.try_read(BitSpan.new(2, 1), <<3::2>>)
+
+{%{value: 2040, size: 11} , 11} = Grammar.Tokenizer.TokenExtractor.try_read(BitSpan.new(11), <<0xFF::8, 0x1::4>>)
+
+```
+
+Using generic bit span matching requires to handle error in callback functions.
+
+The generic token cannot detect invalid patterns (e.g. `0x01` for audio version ID field), and so the callback must either handle / propagate errors upstream, or throw an exception.
+
+<!-- livebook:{"break_markdown":true} -->
+
+Lets define now the `MP3HEader` struct that will gather extracted information.
+
+```elixir
+defmodule MP3Header do
+  defstruct [:audio, :layer]
+
+  @type t :: %__MODULE__ {
+    audio: integer() | :error
+  }
+
+  def set_field(%__MODULE__{} = header, field, :error), do: struct(header, [{field, :error}])
+  def set_field(%__MODULE__{} = header, field, {:ok, value}), do: struct(header, [{field, value}])
+end
+
+
+```
+
+```elixir
+valid_header = <<0xFF::8, 0x7::3, 2::2, 1::2, 1::1, 3::4, 1::2, 0::1, 1::1>>
+wrong_audio_header = <<0xFF::8, 0x7::3, 1::2, 1::2, 1::1, 3::4, 1::2, 0::1, 1::1>>
+wrong_layer_header = <<0xFF::8, 0x7::3, 0::2, 0::2, 1::1, 3::4, 1::2, 0::1, 1::1>>
+```
+
+Now we expose a `Grammar` that uses the `MP3Header` struct and only `BitSpan` tokens to extract data from the input bitstring.
+
+Note how must manually handle erroneous values for header sub-parts.
+
+```elixir
+Grammar.new()
+|> Grammar.add_clause(:mp3_header, [:frame_sync, :audio_version, :layer_desc], fn [_, audio, layer] ->
+  %MP3Header{}
+  |> MP3Header.set_field(:audio, audio)
+  |> MP3Header.set_field(:layer, layer)
+end)
+|> Grammar.add_clause(:frame_sync, [BitSpan.new(11, 2047)], fn [%{value: value}] -> value end)
+|> Grammar.add_clause(:audio_version, [BitSpan.new(2)], fn
+  [%{value: 1}] -> :error
+  [%{value: value}] -> {:ok, value}
+end)
+|> Grammar.add_clause(:layer_desc, [BitSpan.new(2)], fn
+  [%{value: 0}] -> :error
+  [%{value: value}] -> {:ok, value}
+end)
+# |> Grammar.add_clause(:protection, ["foo"], fn _ -> :ok end)
+# |> Grammar.add_clause(:bitrate, ["foo"], fn _ -> :ok end)
+# |> Grammar.add_clause(:sampling, ["foo"], fn _ -> :ok end)
+# |> Grammar.add_clause(:padding, ["foo"], fn _ -> :ok end)
+# |> Grammar.add_clause(:private, ["foo"], fn _ -> :ok end)
+|> Grammar.prepare!()
+|> Grammar.start(:mp3_header)
+|> Grammar.loop(Grammar.Tokenizer.new(wrong_layer_header, false, true))
+```
+
+## Using the DSL
+
+The DSL can be used to express the same grammar. Just add the option `sub_byte_matching: true` when using `Grammar` to enable sub byte token extraction.
+
+```elixir
+defmodule MP3HeaderParser do
+  use Grammar, sub_byte_matching: true
+
+  rule mp3_header(:frame_sync, :audio_version, :layer_desc) do
+    [_, audio, layer] = params
+
+    %MP3Header{}
+    |> MP3Header.set_field(:audio, audio)
+    |> MP3Header.set_field(:layer, layer)
+  end
+
+  rule frame_sync(BitSpan.new(11, 2047)) do
+    [%{value: value}] = params
+    value
+  end
+
+  rule audio_version(BitSpan.new(2)) do
+    case params do
+      [%{value: 1}] -> :error
+      [%{value: value}] -> {:ok, value}
+    end
+  end
+
+  rule layer_desc(BitSpan.new(2)) do
+    case params do
+      [%{value: 0}] -> :error
+      [%{value: value}] -> {:ok, value}
+    end
+  end
+end
+
+MP3HeaderParser.parse(test_header)
 ```

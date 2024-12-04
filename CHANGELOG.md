@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0] - 
+
+### Added
+
+- `Tokenizer` allows bit level token matching, for processing binary input.
+- Added mp3_header_parser.livemb livebook for illustration.
+
 ## [0.3.0] - 2024-11-29
 
 ### Added

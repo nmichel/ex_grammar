@@ -57,7 +57,8 @@ defmodule Project do
         "examples/dsl/ip_list.md",
         "notebooks/dsl_intro.livemd",
         "notebooks/grammar_intro.livemd",
-        "notebooks/musing_with_codegen.livemd"
+        "notebooks/musing_with_codegen.livemd",
+        "notebooks/mp3_header_parser.livemd"
       ],
       groups_for_extras: [
         "DSL Examples": Path.wildcard("examples/dsl/*.md"),

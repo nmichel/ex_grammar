@@ -24,6 +24,10 @@ defmodule Grammar do
 
   In this case, you are fully responsible for handling spaces and line breaks in your rules.
 
+  ### Bit level pattern matching
+
+  TODO:
+
   # Using the API
 
   Creating a new grammar is done by calling `Grammar.new/0`, then adding clauses to it using `Grammar.add_clause/5`.
@@ -54,6 +58,7 @@ defmodule Grammar do
   ## Options
 
   - `drop_spaces: true` (default): if set to `false`, the tokenizer will not drop spaces and line breaks.
+  - `sub_byte_matching: false` (default): if set to `true`, the tokenizer will match tokens at binary-level.
 
   #### Example
 
@@ -93,6 +98,10 @@ defmodule Grammar do
       {:error, {1, 6}, :no_token}
       iex> MyModuleOK.parse(~s/hello  \t world/)
       {:ok, "hello world"}
+
+  # Bit level pattern matching
+
+  Please see [the dedicated livebook](mp3_header_parser.livemd) for more information.
   """
 
   alias Grammar.Clause
@@ -512,16 +521,18 @@ defmodule Grammar do
   defmacro rule?({name, meta, def}, do: blk) when is_atom(name),
     do: CodeGen.store_clause(name, meta, def, blk, true)
 
-  @allowed_opts [drop_spaces: true]
+  @allowed_opts [drop_spaces: true, sub_byte_matching: false]
 
   defmacro __using__(opts) do
     opts = Keyword.validate!(opts, @allowed_opts)
     drop_spaces? = Keyword.get(opts, :drop_spaces, true)
+    sub_byte_matching? = Keyword.get(opts, :sub_byte_matching, false)
 
     quote do
       @compile {:inline, []}
 
       @drop_spaces? unquote(drop_spaces?)
+      @sub_byte_matching? unquote(sub_byte_matching?)
       Module.register_attribute(__MODULE__, :rules, accumulate: true)
 
       @before_compile unquote(__MODULE__)
@@ -534,6 +545,7 @@ defmodule Grammar do
     all_rules = Module.get_attribute(__CALLER__.module, :rules) |> Enum.reverse()
 
     drop_spaces? = Module.get_attribute(__CALLER__.module, :drop_spaces?)
+    sub_byte_matching? = Module.get_attribute(__CALLER__.module, :sub_byte_matching?)
 
     grammar_ast = CodeGen.build_grammar(__CALLER__.module, all_rules)
 
@@ -546,7 +558,7 @@ defmodule Grammar do
       @grammar unquote(grammar_ast)
 
       def parse(input) do
-        tokenizer = Tokenizer.new(input, unquote(drop_spaces?))
+        tokenizer = Tokenizer.new(input, unquote(drop_spaces?), unquote(sub_byte_matching?))
         Grammar.loop(@grammar, tokenizer)
       end
 
